@@ -1,0 +1,49 @@
+[server]
+hostname = "mail.example.com"
+max_connections = 1000
+connection_timeout = 300
+
+[database]
+url = "postgresql://mailserver:password@localhost/mailserver"
+max_connections = 20
+min_connections = 5
+connection_timeout = 30
+
+[tls]
+cert_path = "certs/server.crt"
+key_path = "certs/server.key"
+
+[smtp]
+bind_address = "0.0.0.0"
+port = 25
+tls_port = 465
+max_message_size = 26214400  # 25MB
+require_tls = true
+
+[imap]
+bind_address = "0.0.0.0"
+port = 143
+tls_port = 993
+idle_timeout = 1800
+
+[pop3]
+bind_address = "0.0.0.0"
+port = 110
+tls_port = 995
+session_timeout = 600
+
+[powerdns]
+api_url = "http://localhost:8081"
+api_key = "your-powerdns-api-key-here"
+default_ttl = 3600
+
+[auth]
+password_hash_cost = 12
+session_timeout = 3600
+max_login_attempts = 5
+lockout_duration = 900
+
+[storage]
+mail_storage_path = "/var/mail"
+max_mailbox_size = 1073741824  # 1GB
+cleanup_interval = 86400
