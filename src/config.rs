@@ -1,6 +1,6 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use anyhow::Result;
 use tokio::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,19 +98,19 @@ pub struct StorageConfig {
 
 impl Config {
     pub async fn load() -> Result<Self> {
-        let config_path = std::env::var("CONFIG_PATH")
-            .unwrap_or_else(|_| "config.toml".to_string());
-        
+        let config_path =
+            std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.toml".to_string());
+
         if !Path::new(&config_path).exists() {
             Self::create_default_config(&config_path).await?;
         }
-        
+
         let config_content = fs::read_to_string(&config_path).await?;
         let config: Config = toml::from_str(&config_content)?;
-        
+
         Ok(config)
     }
-    
+
     async fn create_default_config(path: &str) -> Result<()> {
         let default_config = Config {
             server: ServerConfig {
@@ -173,13 +173,13 @@ impl Config {
             storage: StorageConfig {
                 mail_storage_path: "/var/mail".to_string(),
                 max_mailbox_size: 1024 * 1024 * 1024, // 1GB
-                cleanup_interval: 86400, // 24 hours
+                cleanup_interval: 86400,              // 24 hours
             },
         };
-        
+
         let config_content = toml::to_string_pretty(&default_config)?;
         fs::write(path, config_content).await?;
-        
+
         Ok(())
     }
 }

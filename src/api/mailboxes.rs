@@ -8,11 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::{
-    api::AppState,
-    auth::User,
-    storage::mailbox::MailboxManager,
-};
+use crate::{api::AppState, auth::User, storage::mailbox::MailboxManager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateMailboxRequest {
@@ -43,8 +39,10 @@ pub async fn list_mailboxes(
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<MailboxResponse>>, (StatusCode, Json<Value>)> {
     let mailbox_manager = MailboxManager::new(state.db.clone());
-    
-    let mailboxes = mailbox_manager.list_user_mailboxes(user.id).await
+
+    let mailboxes = mailbox_manager
+        .list_user_mailboxes(user.id)
+        .await
         .map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -76,8 +74,10 @@ pub async fn create_mailbox(
     Json(payload): Json<CreateMailboxRequest>,
 ) -> Result<Json<MailboxResponse>, (StatusCode, Json<Value>)> {
     let mailbox_manager = MailboxManager::new(state.db.clone());
-    
-    let mailbox = mailbox_manager.create_mailbox(user.id, &payload.name, payload.parent_id).await
+
+    let mailbox = mailbox_manager
+        .create_mailbox(user.id, &payload.name, payload.parent_id)
+        .await
         .map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -106,8 +106,10 @@ pub async fn get_mailbox(
     Path(id): Path<i32>,
 ) -> Result<Json<MailboxResponse>, (StatusCode, Json<Value>)> {
     let mailbox_manager = MailboxManager::new(state.db.clone());
-    
-    let mailbox = mailbox_manager.get_mailbox_with_stats(id, user.id).await
+
+    let mailbox = mailbox_manager
+        .get_mailbox_with_stats(id, user.id)
+        .await
         .map_err(|_| {
             (
                 StatusCode::NOT_FOUND,
@@ -137,9 +139,11 @@ pub async fn update_mailbox(
     Json(payload): Json<UpdateMailboxRequest>,
 ) -> Result<Json<MailboxResponse>, (StatusCode, Json<Value>)> {
     let mailbox_manager = MailboxManager::new(state.db.clone());
-    
+
     if let Some(name) = payload.name {
-        mailbox_manager.rename_mailbox(id, user.id, &name).await
+        mailbox_manager
+            .rename_mailbox(id, user.id, &name)
+            .await
             .map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -148,7 +152,9 @@ pub async fn update_mailbox(
             })?;
     }
 
-    let mailbox = mailbox_manager.get_mailbox_with_stats(id, user.id).await
+    let mailbox = mailbox_manager
+        .get_mailbox_with_stats(id, user.id)
+        .await
         .map_err(|_| {
             (
                 StatusCode::NOT_FOUND,
@@ -177,8 +183,10 @@ pub async fn delete_mailbox(
     Path(id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let mailbox_manager = MailboxManager::new(state.db.clone());
-    
-    mailbox_manager.delete_mailbox(id, user.id).await
+
+    mailbox_manager
+        .delete_mailbox(id, user.id)
+        .await
         .map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -195,10 +203,12 @@ pub async fn list_messages(
     Path(mailbox_id): Path<i32>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let limit: i64 = params.get("limit")
+    let limit: i64 = params
+        .get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
-    let offset: i64 = params.get("offset")
+    let offset: i64 = params
+        .get("offset")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 

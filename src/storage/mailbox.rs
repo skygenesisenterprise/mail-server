@@ -1,10 +1,10 @@
 use crate::error::Result;
-use sqlx::{PgPool, Row};
-use serde::{Serialize, Deserialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::collections::HashMap;
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mailbox {
@@ -48,10 +48,10 @@ impl MailboxManager {
     /// Create a new mailbox for a user
     pub async fn create_mailbox(&self, user_id: Uuid, name: &str) -> Result<Mailbox> {
         debug!("Creating mailbox '{}' for user {}", name, user_id);
-        
+
         // Generate UIDVALIDITY as current timestamp
         let uidvalidity = chrono::Utc::now().timestamp() as i32;
-        
+
         let mailbox = sqlx::query_as!(
             Mailbox,
             r#"
@@ -65,8 +65,11 @@ impl MailboxManager {
         )
         .fetch_one(&self.pool)
         .await?;
-        
-        info!("Created mailbox '{}' with ID {} for user {}", name, mailbox.id, user_id);
+
+        info!(
+            "Created mailbox '{}' with ID {} for user {}",
+            name, mailbox.id, user_id
+        );
         Ok(mailbox)
     }
 
@@ -79,7 +82,7 @@ impl MailboxManager {
         )
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(mailbox)
     }
 
@@ -93,7 +96,7 @@ impl MailboxManager {
         )
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(mailbox)
     }
 
@@ -106,35 +109,35 @@ impl MailboxManager {
         )
         .fetch_all(&self.pool)
         .await?;
-        
+
         Ok(mailboxes)
     }
 
     /// Delete a mailbox and all its messages
     pub async fn delete_mailbox(&self, mailbox_id: Uuid) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
-        
+
         // Delete all messages in the mailbox (cascading will handle attachments and headers)
         let message_count = sqlx::query_scalar::<_, i64>(
-            "DELETE FROM messages WHERE mailbox_id = $1 RETURNING COUNT(*)"
+            "DELETE FROM messages WHERE mailbox_id = $1 RETURNING COUNT(*)",
         )
         .bind(mailbox_id)
         .fetch_one(&mut *tx)
         .await?;
-        
+
         // Delete the mailbox
-        let deleted_rows = sqlx::query!(
-            "DELETE FROM mailboxes WHERE id = $1",
-            mailbox_id
-        )
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        
+        let deleted_rows = sqlx::query!("DELETE FROM mailboxes WHERE id = $1", mailbox_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+
         tx.commit().await?;
-        
+
         if deleted_rows > 0 {
-            info!("Deleted mailbox {} with {} messages", mailbox_id, message_count);
+            info!(
+                "Deleted mailbox {} with {} messages",
+                mailbox_id, message_count
+            );
             Ok(true)
         } else {
             warn!("Attempted to delete non-existent mailbox {}", mailbox_id);
@@ -152,7 +155,7 @@ impl MailboxManager {
         .execute(&self.pool)
         .await?
         .rows_affected();
-        
+
         if updated_rows > 0 {
             info!("Renamed mailbox {} to '{}'", mailbox_id, new_name);
             Ok(true)
@@ -179,7 +182,7 @@ impl MailboxManager {
         )
         .fetch_one(&self.pool)
         .await?;
-        
+
         Ok(MailboxStats {
             mailbox_id,
             message_count: stats.message_count.unwrap_or(0) as i32,
@@ -197,9 +200,9 @@ impl MailboxManager {
             Some(mb) => mb,
             None => return Ok(None),
         };
-        
+
         let stats = self.get_mailbox_stats(mailbox_id).await?;
-        
+
         // Get available flags from messages in this mailbox
         let flags_result = sqlx::query!(
             "SELECT DISTINCT unnest(flags) as flag FROM messages WHERE mailbox_id = $1",
@@ -207,12 +210,12 @@ impl MailboxManager {
         )
         .fetch_all(&self.pool)
         .await?;
-        
+
         let mut flags: Vec<String> = flags_result
             .into_iter()
             .filter_map(|row| row.flag)
             .collect();
-        
+
         // Add standard IMAP flags if not present
         let standard_flags = vec![
             "\\Seen".to_string(),
@@ -222,13 +225,13 @@ impl MailboxManager {
             "\\Draft".to_string(),
             "\\Recent".to_string(),
         ];
-        
+
         for flag in standard_flags {
             if !flags.contains(&flag) {
                 flags.push(flag);
             }
         }
-        
+
         let permanent_flags = vec![
             "\\Seen".to_string(),
             "\\Answered".to_string(),
@@ -237,7 +240,7 @@ impl MailboxManager {
             "\\Draft".to_string(),
             "\\*".to_string(), // Indicates custom flags are allowed
         ];
-        
+
         Ok(Some(MailboxInfo {
             mailbox,
             stats,
@@ -249,14 +252,14 @@ impl MailboxManager {
     /// Get next UID for a mailbox and increment UIDNEXT
     pub async fn get_next_uid(&self, mailbox_id: Uuid) -> Result<i32> {
         let mut tx = self.pool.begin().await?;
-        
+
         let current_uidnext = sqlx::query_scalar::<_, i32>(
             "SELECT uidnext FROM mailboxes WHERE id = $1 FOR UPDATE",
-            mailbox_id
+            mailbox_id,
         )
         .fetch_one(&mut *tx)
         .await?;
-        
+
         // Increment UIDNEXT
         sqlx::query!(
             "UPDATE mailboxes SET uidnext = uidnext + 1 WHERE id = $1",
@@ -264,16 +267,16 @@ impl MailboxManager {
         )
         .execute(&mut *tx)
         .await?;
-        
+
         tx.commit().await?;
-        
+
         Ok(current_uidnext)
     }
 
     /// Update UIDVALIDITY (used when mailbox structure changes significantly)
     pub async fn update_uidvalidity(&self, mailbox_id: Uuid) -> Result<i32> {
         let new_uidvalidity = chrono::Utc::now().timestamp() as i32;
-        
+
         sqlx::query!(
             "UPDATE mailboxes SET uidvalidity = $1, uidnext = 1 WHERE id = $2",
             new_uidvalidity,
@@ -281,8 +284,11 @@ impl MailboxManager {
         )
         .execute(&self.pool)
         .await?;
-        
-        info!("Updated UIDVALIDITY for mailbox {} to {}", mailbox_id, new_uidvalidity);
+
+        info!(
+            "Updated UIDVALIDITY for mailbox {} to {}",
+            mailbox_id, new_uidvalidity
+        );
         Ok(new_uidvalidity)
     }
 
@@ -300,7 +306,7 @@ impl MailboxManager {
         )
         .fetch_one(&self.pool)
         .await?;
-        
+
         Ok((
             result.total_bytes.unwrap_or(0),
             result.message_count.unwrap_or(0) as i32,
@@ -312,16 +318,19 @@ impl MailboxManager {
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM mailboxes WHERE id = $1 AND user_id = $2)",
             mailbox_id,
-            user_id
+            user_id,
         )
         .fetch_one(&self.pool)
         .await?;
-        
+
         Ok(exists)
     }
 
     /// Get mailboxes with their message counts for a user
-    pub async fn get_mailbox_summary(&self, user_id: Uuid) -> Result<HashMap<String, (Uuid, i32, i32)>> {
+    pub async fn get_mailbox_summary(
+        &self,
+        user_id: Uuid,
+    ) -> Result<HashMap<String, (Uuid, i32, i32)>> {
         let results = sqlx::query!(
             r#"
             SELECT 
@@ -339,7 +348,7 @@ impl MailboxManager {
         )
         .fetch_all(&self.pool)
         .await?;
-        
+
         let mut summary = HashMap::new();
         for row in results {
             summary.insert(
@@ -351,22 +360,16 @@ impl MailboxManager {
                 ),
             );
         }
-        
+
         Ok(summary)
     }
 
     /// Create default mailboxes for a new user
     pub async fn create_default_mailboxes(&self, user_id: Uuid) -> Result<Vec<Mailbox>> {
-        let default_mailboxes = vec![
-            "INBOX",
-            "Sent",
-            "Drafts",
-            "Trash",
-            "Junk",
-        ];
-        
+        let default_mailboxes = vec!["INBOX", "Sent", "Drafts", "Trash", "Junk"];
+
         let mut created_mailboxes = Vec::new();
-        
+
         for name in default_mailboxes {
             match self.create_mailbox(user_id, name).await {
                 Ok(mailbox) => {
@@ -374,11 +377,14 @@ impl MailboxManager {
                     info!("Created default mailbox '{}' for user {}", name, user_id);
                 }
                 Err(e) => {
-                    error!("Failed to create default mailbox '{}' for user {}: {}", name, user_id, e);
+                    error!(
+                        "Failed to create default mailbox '{}' for user {}: {}",
+                        name, user_id, e
+                    );
                 }
             }
         }
-        
+
         Ok(created_mailboxes)
     }
 
@@ -394,19 +400,22 @@ impl MailboxManager {
             AND NOT ('\\Important' = ANY(flags))
             "#,
             mailbox_id,
-            days_old
+            days_old,
         )
         .fetch_one(&self.pool)
         .await?;
-        
-        info!("Archived {} messages in mailbox {}", archived_count, mailbox_id);
+
+        info!(
+            "Archived {} messages in mailbox {}",
+            archived_count, mailbox_id
+        );
         Ok(archived_count as i32)
     }
 
     /// Expunge deleted messages from a mailbox
     pub async fn expunge_mailbox(&self, mailbox_id: Uuid) -> Result<Vec<i32>> {
         let mut tx = self.pool.begin().await?;
-        
+
         // Get UIDs of messages marked for deletion
         let deleted_uids = sqlx::query_scalar::<_, i32>(
             "SELECT uid FROM messages WHERE mailbox_id = $1 AND '\\Deleted' = ANY(flags) ORDER BY uid",
@@ -414,7 +423,7 @@ impl MailboxManager {
         )
         .fetch_all(&mut *tx)
         .await?;
-        
+
         if !deleted_uids.is_empty() {
             // Delete the messages
             sqlx::query!(
@@ -423,10 +432,14 @@ impl MailboxManager {
             )
             .execute(&mut *tx)
             .await?;
-            
-            info!("Expunged {} messages from mailbox {}", deleted_uids.len(), mailbox_id);
+
+            info!(
+                "Expunged {} messages from mailbox {}",
+                deleted_uids.len(),
+                mailbox_id
+            );
         }
-        
+
         tx.commit().await?;
         Ok(deleted_uids)
     }

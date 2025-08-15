@@ -1,20 +1,20 @@
 pub mod password;
-pub mod session;
 pub mod rate_limit;
 pub mod security;
+pub mod session;
 pub mod totp;
 
 use crate::error::{MailServerError, Result};
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
+use tracing::{error, info, warn};
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
-use tracing::{info, warn, error};
 
 // Re-export commonly used types
 pub use password::PasswordManager;
+pub use rate_limit::{RateLimitEntry, RateLimiter};
+pub use security::{SecurityEvent, SecurityEventType, SecurityLogger};
 pub use session::{Session, SessionManager};
-pub use rate_limit::{RateLimiter, RateLimitEntry};
-pub use security::{SecurityLogger, SecurityEvent, SecurityEventType};
 
 #[derive(Debug, Clone)]
 pub struct User {
@@ -48,17 +48,28 @@ impl AuthService {
             db_pool,
         }
     }
-    
-    pub async fn authenticate(&self, email: &str, password: &str, ip_address: Option<String>) -> Result<Option<User>> {
+
+    pub async fn authenticate(
+        &self,
+        email: &str,
+        password: &str,
+        ip_address: Option<String>,
+    ) -> Result<Option<User>> {
         // Check rate limiting
-        if self.rate_limiter.is_rate_limited(email, &ip_address).await? {
-            self.security_logger.log_event(
-                None,
-                SecurityEventType::LoginFailure,
-                ip_address.clone(),
-                None,
-                Some("Rate limited".to_string()),
-            ).await?;
+        if self
+            .rate_limiter
+            .is_rate_limited(email, &ip_address)
+            .await?
+        {
+            self.security_logger
+                .log_event(
+                    None,
+                    SecurityEventType::LoginFailure,
+                    ip_address.clone(),
+                    None,
+                    Some("Rate limited".to_string()),
+                )
+                .await?;
             return Err(MailServerError::RateLimitExceeded);
         }
 
@@ -70,39 +81,46 @@ impl AuthService {
         )
         .fetch_optional(&self.db_pool)
         .await?;
-        
+
         if let Some(row) = row {
             // Check if account is locked
             if let Some(locked_until) = row.locked_until {
                 if locked_until > Utc::now() {
-                    self.security_logger.log_event(
-                        Some(row.id),
-                        SecurityEventType::LoginFailure,
-                        ip_address,
-                        None,
-                        Some("Account locked".to_string()),
-                    ).await?;
+                    self.security_logger
+                        .log_event(
+                            Some(row.id),
+                            SecurityEventType::LoginFailure,
+                            ip_address,
+                            None,
+                            Some("Account locked".to_string()),
+                        )
+                        .await?;
                     return Ok(None);
                 }
             }
 
             // Check if account is active
             if !row.active {
-                self.security_logger.log_event(
-                    Some(row.id),
-                    SecurityEventType::LoginFailure,
-                    ip_address,
-                    None,
-                    Some("Account inactive".to_string()),
-                ).await?;
+                self.security_logger
+                    .log_event(
+                        Some(row.id),
+                        SecurityEventType::LoginFailure,
+                        ip_address,
+                        None,
+                        Some("Account inactive".to_string()),
+                    )
+                    .await?;
                 return Ok(None);
             }
 
-            if self.password_manager.verify_password(password, &row.password_hash)? {
+            if self
+                .password_manager
+                .verify_password(password, &row.password_hash)?
+            {
                 // Successful authentication
                 self.rate_limiter.reset_attempts(email, &ip_address).await?;
                 self.update_last_login(row.id).await?;
-                
+
                 let user = User {
                     id: row.id,
                     email: row.email.clone(),
@@ -116,50 +134,60 @@ impl AuthService {
                     locked_until: row.locked_until,
                 };
 
-                self.security_logger.log_event(
-                    Some(row.id),
-                    SecurityEventType::LoginSuccess,
-                    ip_address,
-                    None,
-                    None,
-                ).await?;
+                self.security_logger
+                    .log_event(
+                        Some(row.id),
+                        SecurityEventType::LoginSuccess,
+                        ip_address,
+                        None,
+                        None,
+                    )
+                    .await?;
 
                 return Ok(Some(user));
             } else {
                 // Failed authentication
                 self.increment_failed_attempts(email, row.id).await?;
-                self.rate_limiter.record_failed_attempt(email, &ip_address).await?;
-                
-                self.security_logger.log_event(
-                    Some(row.id),
-                    SecurityEventType::LoginFailure,
-                    ip_address,
-                    None,
-                    Some("Invalid password".to_string()),
-                ).await?;
+                self.rate_limiter
+                    .record_failed_attempt(email, &ip_address)
+                    .await?;
+
+                self.security_logger
+                    .log_event(
+                        Some(row.id),
+                        SecurityEventType::LoginFailure,
+                        ip_address,
+                        None,
+                        Some("Invalid password".to_string()),
+                    )
+                    .await?;
             }
         } else {
             // User not found - still record the attempt to prevent enumeration
-            self.rate_limiter.record_failed_attempt(email, &ip_address).await?;
-            
-            self.security_logger.log_event(
-                None,
-                SecurityEventType::LoginFailure,
-                ip_address,
-                None,
-                Some("User not found".to_string()),
-            ).await?;
+            self.rate_limiter
+                .record_failed_attempt(email, &ip_address)
+                .await?;
+
+            self.security_logger
+                .log_event(
+                    None,
+                    SecurityEventType::LoginFailure,
+                    ip_address,
+                    None,
+                    Some("User not found".to_string()),
+                )
+                .await?;
         }
-        
+
         Ok(None)
     }
-    
+
     pub async fn create_user(&self, email: &str, password: &str, domain_id: Uuid) -> Result<Uuid> {
         // Validate password strength
         self.password_manager.validate_password_strength(password)?;
 
         let password_hash = self.password_manager.hash_password(password)?;
-        
+
         let user_id = sqlx::query_scalar!(
             "INSERT INTO users (email, password_hash, domain_id) VALUES ($1, $2, $3) RETURNING id",
             email,
@@ -168,50 +196,73 @@ impl AuthService {
         )
         .fetch_one(&self.db_pool)
         .await?;
-        
+
         // Create default mailboxes
         self.create_default_mailboxes(user_id).await?;
-        
+
         // Log user creation
-        self.security_logger.log_event(
-            Some(user_id),
-            SecurityEventType::AccountCreated,
-            None,
-            None,
-            Some("User account created".to_string()),
-        ).await?;
-        
+        self.security_logger
+            .log_event(
+                Some(user_id),
+                SecurityEventType::AccountCreated,
+                None,
+                None,
+                Some("User account created".to_string()),
+            )
+            .await?;
+
         Ok(user_id)
     }
 
-    pub async fn change_password(&self, user_id: Uuid, old_password: &str, new_password: &str) -> Result<()> {
-        self.password_manager.change_password(user_id, old_password, new_password).await?;
+    pub async fn change_password(
+        &self,
+        user_id: Uuid,
+        old_password: &str,
+        new_password: &str,
+    ) -> Result<()> {
+        self.password_manager
+            .change_password(user_id, old_password, new_password)
+            .await?;
 
         // Invalidate all sessions for this user
-        self.session_manager.invalidate_user_sessions(user_id).await?;
+        self.session_manager
+            .invalidate_user_sessions(user_id)
+            .await?;
 
         // Log password change
-        self.security_logger.log_event(
-            Some(user_id),
-            SecurityEventType::PasswordChanged,
-            None,
-            None,
-            None,
-        ).await?;
+        self.security_logger
+            .log_event(
+                Some(user_id),
+                SecurityEventType::PasswordChanged,
+                None,
+                None,
+                None,
+            )
+            .await?;
 
         Ok(())
     }
 
-    pub async fn create_session(&self, user_id: Uuid, ip_address: Option<String>, user_agent: Option<String>) -> Result<Session> {
-        let session = self.session_manager.create_session(user_id, ip_address.clone(), user_agent.clone()).await?;
-        
-        self.security_logger.log_event(
-            Some(user_id),
-            SecurityEventType::SessionCreated,
-            ip_address,
-            user_agent,
-            None,
-        ).await?;
+    pub async fn create_session(
+        &self,
+        user_id: Uuid,
+        ip_address: Option<String>,
+        user_agent: Option<String>,
+    ) -> Result<Session> {
+        let session = self
+            .session_manager
+            .create_session(user_id, ip_address.clone(), user_agent.clone())
+            .await?;
+
+        self.security_logger
+            .log_event(
+                Some(user_id),
+                SecurityEventType::SessionCreated,
+                ip_address,
+                user_agent,
+                None,
+            )
+            .await?;
 
         Ok(session)
     }
@@ -227,7 +278,7 @@ impl AuthService {
     pub async fn enable_two_factor(&self, user_id: Uuid) -> Result<String> {
         // Generate TOTP secret
         let secret = totp::generate_secret();
-        
+
         // Store secret in database
         sqlx::query!(
             "UPDATE users SET two_factor_enabled = true, totp_secret = $1 WHERE id = $2",
@@ -238,13 +289,15 @@ impl AuthService {
         .await?;
 
         // Log 2FA enablement
-        self.security_logger.log_event(
-            Some(user_id),
-            SecurityEventType::TwoFactorEnabled,
-            None,
-            None,
-            None,
-        ).await?;
+        self.security_logger
+            .log_event(
+                Some(user_id),
+                SecurityEventType::TwoFactorEnabled,
+                None,
+                None,
+                None,
+            )
+            .await?;
 
         Ok(secret)
     }
@@ -286,13 +339,18 @@ impl AuthService {
             .execute(&self.db_pool)
             .await?;
 
-            self.security_logger.log_event(
-                Some(user_id),
-                SecurityEventType::AccountLocked,
-                None,
-                None,
-                Some(format!("Account locked after {} failed attempts", result.failed_login_attempts)),
-            ).await?;
+            self.security_logger
+                .log_event(
+                    Some(user_id),
+                    SecurityEventType::AccountLocked,
+                    None,
+                    None,
+                    Some(format!(
+                        "Account locked after {} failed attempts",
+                        result.failed_login_attempts
+                    )),
+                )
+                .await?;
         }
 
         Ok(())
@@ -312,7 +370,7 @@ impl AuthService {
 
     async fn create_default_mailboxes(&self, user_id: Uuid) -> Result<()> {
         let default_mailboxes = ["INBOX", "Sent", "Drafts", "Trash"];
-        
+
         for mailbox_name in &default_mailboxes {
             sqlx::query!(
                 "INSERT INTO mailboxes (user_id, name) VALUES ($1, $2)",
@@ -322,7 +380,7 @@ impl AuthService {
             .execute(&self.db_pool)
             .await?;
         }
-        
+
         Ok(())
     }
 }

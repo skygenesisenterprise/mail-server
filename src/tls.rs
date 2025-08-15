@@ -13,7 +13,9 @@ pub async fn load_tls_config(config: &TlsConfig) -> Result<Arc<TlsAcceptor>> {
         .map_err(|e| MailServerError::Configuration(format!("Failed to open cert file: {}", e)))?;
     let mut cert_reader = BufReader::new(cert_file);
     let cert_chain = certs(&mut cert_reader)
-        .map_err(|e| MailServerError::Configuration(format!("Failed to parse certificates: {}", e)))?
+        .map_err(|e| {
+            MailServerError::Configuration(format!("Failed to parse certificates: {}", e))
+        })?
         .into_iter()
         .map(Certificate)
         .collect();
@@ -22,11 +24,14 @@ pub async fn load_tls_config(config: &TlsConfig) -> Result<Arc<TlsAcceptor>> {
     let key_file = File::open(&config.key_path)
         .map_err(|e| MailServerError::Configuration(format!("Failed to open key file: {}", e)))?;
     let mut key_reader = BufReader::new(key_file);
-    let mut keys = pkcs8_private_keys(&mut key_reader)
-        .map_err(|e| MailServerError::Configuration(format!("Failed to parse private key: {}", e)))?;
+    let mut keys = pkcs8_private_keys(&mut key_reader).map_err(|e| {
+        MailServerError::Configuration(format!("Failed to parse private key: {}", e))
+    })?;
 
     if keys.is_empty() {
-        return Err(MailServerError::Configuration("No private key found".to_string()));
+        return Err(MailServerError::Configuration(
+            "No private key found".to_string(),
+        ));
     }
 
     let private_key = PrivateKey(keys.remove(0));
@@ -36,7 +41,9 @@ pub async fn load_tls_config(config: &TlsConfig) -> Result<Arc<TlsAcceptor>> {
         .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(cert_chain, private_key)
-        .map_err(|e| MailServerError::Configuration(format!("Failed to create TLS config: {}", e)))?;
+        .map_err(|e| {
+            MailServerError::Configuration(format!("Failed to create TLS config: {}", e))
+        })?;
 
     Ok(Arc::new(TlsAcceptor::from(Arc::new(tls_config))))
 }

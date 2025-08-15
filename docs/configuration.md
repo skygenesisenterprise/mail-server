@@ -1,6 +1,6 @@
 # Configuration Reference
 
-The Rust Mail Server uses TOML format for configuration. The main configuration file is located at `/etc/rust-mail-server/config.toml`.
+The Enterprise Mail Server uses TOML format for configuration. The main configuration file is located at `/etc/enterprise-mail-server/config.toml`.
 
 ## Configuration Sections
 

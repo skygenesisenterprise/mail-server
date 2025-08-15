@@ -1,5 +1,5 @@
 use crate::error::{MailServerError, Result};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -39,7 +39,7 @@ impl RateLimiter {
 
     pub async fn is_rate_limited(&self, email: &str, ip_address: &Option<String>) -> Result<bool> {
         let limiter = self.entries.read().await;
-        
+
         // Check both email and IP-based rate limiting
         let keys = self.get_rate_limit_keys(email, ip_address);
 
@@ -51,10 +51,11 @@ impl RateLimiter {
                         return Ok(true);
                     }
                 }
-                
+
                 // Check if too many attempts in recent time window
-                if entry.attempts >= self.max_attempts && 
-                   entry.last_attempt > Utc::now() - self.window_duration {
+                if entry.attempts >= self.max_attempts
+                    && entry.last_attempt > Utc::now() - self.window_duration
+                {
                     return Ok(true);
                 }
             }
@@ -63,9 +64,13 @@ impl RateLimiter {
         Ok(false)
     }
 
-    pub async fn record_failed_attempt(&self, email: &str, ip_address: &Option<String>) -> Result<()> {
+    pub async fn record_failed_attempt(
+        &self,
+        email: &str,
+        ip_address: &Option<String>,
+    ) -> Result<()> {
         let mut limiter = self.entries.write().await;
-        
+
         let keys = self.get_rate_limit_keys(email, ip_address);
 
         for key in keys.iter().filter(|k| !k.is_empty()) {
@@ -89,9 +94,9 @@ impl RateLimiter {
 
     pub async fn reset_attempts(&self, email: &str, ip_address: &Option<String>) -> Result<()> {
         let mut limiter = self.entries.write().await;
-        
+
         let keys = self.get_rate_limit_keys(email, ip_address);
-        
+
         for key in keys.iter().filter(|k| !k.is_empty()) {
             limiter.remove(key);
         }
@@ -99,9 +104,13 @@ impl RateLimiter {
         Ok(())
     }
 
-    pub async fn get_remaining_attempts(&self, email: &str, ip_address: &Option<String>) -> Result<u32> {
+    pub async fn get_remaining_attempts(
+        &self,
+        email: &str,
+        ip_address: &Option<String>,
+    ) -> Result<u32> {
         let limiter = self.entries.read().await;
-        
+
         let keys = self.get_rate_limit_keys(email, ip_address);
         let mut min_remaining = self.max_attempts;
 
@@ -117,9 +126,13 @@ impl RateLimiter {
         Ok(min_remaining)
     }
 
-    pub async fn get_lockout_time(&self, email: &str, ip_address: &Option<String>) -> Result<Option<DateTime<Utc>>> {
+    pub async fn get_lockout_time(
+        &self,
+        email: &str,
+        ip_address: &Option<String>,
+    ) -> Result<Option<DateTime<Utc>>> {
         let limiter = self.entries.read().await;
-        
+
         let keys = self.get_rate_limit_keys(email, ip_address);
         let mut latest_lockout: Option<DateTime<Utc>> = None;
 
@@ -142,7 +155,7 @@ impl RateLimiter {
     pub async fn cleanup_expired_entries(&self) -> Result<()> {
         let mut limiter = self.entries.write().await;
         let now = Utc::now();
-        
+
         limiter.retain(|_, entry| {
             // Keep entries that are still locked or have recent attempts
             if let Some(locked_until) = entry.locked_until {
@@ -150,7 +163,7 @@ impl RateLimiter {
                     return true;
                 }
             }
-            
+
             entry.last_attempt > now - self.window_duration
         });
 
@@ -160,7 +173,10 @@ impl RateLimiter {
     fn get_rate_limit_keys(&self, email: &str, ip_address: &Option<String>) -> Vec<String> {
         vec![
             format!("email:{}", email),
-            ip_address.as_ref().map(|ip| format!("ip:{}", ip)).unwrap_or_default(),
+            ip_address
+                .as_ref()
+                .map(|ip| format!("ip:{}", ip))
+                .unwrap_or_default(),
         ]
     }
 }

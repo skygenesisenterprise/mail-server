@@ -8,11 +8,7 @@ use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::HashMap;
 
-use crate::{
-    api::AppState,
-    auth::Claims,
-    error::MailServerError,
-};
+use crate::{api::AppState, auth::Claims, error::MailServerError};
 
 #[derive(Debug, Serialize)]
 pub struct ServerStats {
@@ -146,9 +142,7 @@ pub async fn get_logs(
 
     let limit = params.limit.unwrap_or(100).min(1000);
 
-    let mut query_builder = sqlx::QueryBuilder::new(
-        "SELECT * FROM security_events WHERE 1=1"
-    );
+    let mut query_builder = sqlx::QueryBuilder::new("SELECT * FROM security_events WHERE 1=1");
 
     // Add filters
     if let Some(level) = &params.level {
@@ -333,7 +327,8 @@ fn get_uptime_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() % 86400 // Simulate daily restart
+        .as_secs()
+        % 86400 // Simulate daily restart
 }
 
 fn get_rust_version() -> String {

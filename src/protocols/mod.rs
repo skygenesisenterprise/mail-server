@@ -1,11 +1,12 @@
-pub mod smtp;
 pub mod imap;
 pub mod pop3;
+pub mod smtp;
 
 use crate::error::Result;
+use crate::protocols::ProtocolServer;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_rustls::TlsAcceptor;
-use sqlx::PgPool;
 
 #[async_trait::async_trait]
 pub trait ProtocolServer {

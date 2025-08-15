@@ -9,12 +9,7 @@ use sqlx::Row;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::{
-    api::AppState,
-    auth::Claims,
-    domain::DomainManager,
-    error::MailServerError,
-};
+use crate::{api::AppState, auth::Claims, domain::DomainManager, error::MailServerError};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateDomainRequest {

@@ -1,8 +1,8 @@
 use crate::error::Result;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use uuid::Uuid;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct SecurityEvent {
@@ -67,10 +67,13 @@ impl SecurityLogger {
 
         // Also log to application logs for monitoring
         match event_type {
-            SecurityEventType::LoginFailure | 
-            SecurityEventType::AccountLocked | 
-            SecurityEventType::SuspiciousActivity => {
-                warn!("Security event: {:?} for user {:?} from IP {:?}", event_type, user_id, ip_address);
+            SecurityEventType::LoginFailure
+            | SecurityEventType::AccountLocked
+            | SecurityEventType::SuspiciousActivity => {
+                warn!(
+                    "Security event: {:?} for user {:?} from IP {:?}",
+                    event_type, user_id, ip_address
+                );
             }
             _ => {
                 info!("Security event: {:?} for user {:?}", event_type, user_id);
@@ -80,7 +83,11 @@ impl SecurityLogger {
         Ok(())
     }
 
-    pub async fn get_security_events(&self, user_id: Option<Uuid>, limit: i64) -> Result<Vec<SecurityEvent>> {
+    pub async fn get_security_events(
+        &self,
+        user_id: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<SecurityEvent>> {
         let rows = if let Some(user_id) = user_id {
             sqlx::query!(
                 "SELECT id, user_id, event_type, ip_address, user_agent, details, created_at
@@ -118,7 +125,11 @@ impl SecurityLogger {
         Ok(events)
     }
 
-    pub async fn get_failed_login_attempts(&self, user_id: Option<Uuid>, since: DateTime<Utc>) -> Result<i64> {
+    pub async fn get_failed_login_attempts(
+        &self,
+        user_id: Option<Uuid>,
+        since: DateTime<Utc>,
+    ) -> Result<i64> {
         let count = if let Some(user_id) = user_id {
             sqlx::query_scalar!(
                 "SELECT COUNT(*) FROM security_events 
@@ -156,7 +167,8 @@ impl SecurityLogger {
         .await?;
 
         if failed_logins.len() > 3 {
-            suspicious_patterns.push("Multiple failed login attempts from different IP addresses".to_string());
+            suspicious_patterns
+                .push("Multiple failed login attempts from different IP addresses".to_string());
         }
 
         // Check for login from unusual locations (simplified - would need GeoIP in production)
@@ -183,10 +195,10 @@ impl SecurityLogger {
         // Simple check for new IP addresses
         for current_ip in &current_ips {
             if let Some(current_ip) = &current_ip.ip_address {
-                let is_known = recent_ips.iter().any(|row| {
-                    row.ip_address.as_ref() == Some(current_ip)
-                });
-                
+                let is_known = recent_ips
+                    .iter()
+                    .any(|row| row.ip_address.as_ref() == Some(current_ip));
+
                 if !is_known {
                     suspicious_patterns.push(format!("Login from new IP address: {}", current_ip));
                 }

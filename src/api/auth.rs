@@ -1,13 +1,8 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    Extension,
-};
+use axum::{extract::State, http::StatusCode, response::Json, Extension};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
-use chrono::{Utc, Duration};
 
 use crate::{
     api::AppState,
@@ -58,9 +53,12 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, Json<Value>)> {
     let auth_service = AuthService::new(state.db.clone());
-    
+
     // Authenticate user
-    let user = match auth_service.authenticate(&payload.email, &payload.password).await {
+    let user = match auth_service
+        .authenticate(&payload.email, &payload.password)
+        .await
+    {
         Ok(user) => user,
         Err(_) => {
             return Err((
@@ -73,7 +71,11 @@ pub async fn login(
     // Check TOTP if enabled
     if user.totp_secret.is_some() {
         if let Some(totp_code) = payload.totp_code {
-            if !auth_service.verify_totp(&user.email, &totp_code).await.unwrap_or(false) {
+            if !auth_service
+                .verify_totp(&user.email, &totp_code)
+                .await
+                .unwrap_or(false)
+            {
                 return Err((
                     StatusCode::UNAUTHORIZED,
                     Json(json!({"error": "Invalid TOTP code"})),
@@ -90,7 +92,7 @@ pub async fn login(
     // Generate JWT tokens
     let now = Utc::now();
     let expires_in = 3600; // 1 hour
-    
+
     let claims = Claims {
         sub: user.id.to_string(),
         email: user.email.clone(),
@@ -103,7 +105,8 @@ pub async fn login(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(state.config.jwt_secret.as_ref()),
-    ).map_err(|_| {
+    )
+    .map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to generate token"})),
@@ -122,7 +125,8 @@ pub async fn login(
         &Header::default(),
         &refresh_claims,
         &EncodingKey::from_secret(state.config.jwt_secret.as_ref()),
-    ).map_err(|_| {
+    )
+    .map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to generate refresh token"})),
@@ -160,7 +164,8 @@ pub async fn refresh_token(
         &payload.refresh_token,
         &DecodingKey::from_secret(state.config.jwt_secret.as_ref()),
         &Validation::default(),
-    ).map_err(|_| {
+    )
+    .map_err(|_| {
         (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "Invalid refresh token"})),
@@ -168,7 +173,9 @@ pub async fn refresh_token(
     })?;
 
     let auth_service = AuthService::new(state.db.clone());
-    let user = auth_service.get_user_by_email(&token_data.claims.email).await
+    let user = auth_service
+        .get_user_by_email(&token_data.claims.email)
+        .await
         .map_err(|_| {
             (
                 StatusCode::UNAUTHORIZED,
@@ -179,7 +186,7 @@ pub async fn refresh_token(
     // Generate new access token
     let now = Utc::now();
     let expires_in = 3600;
-    
+
     let claims = Claims {
         sub: user.id.to_string(),
         email: user.email.clone(),
@@ -192,7 +199,8 @@ pub async fn refresh_token(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(state.config.jwt_secret.as_ref()),
-    ).map_err(|_| {
+    )
+    .map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to generate token"})),

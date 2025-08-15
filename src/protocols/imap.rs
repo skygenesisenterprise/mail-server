@@ -1,17 +1,17 @@
+use crate::auth::{AuthService, User};
 use crate::config::ImapConfig;
 use crate::error::{MailServerError, Result};
 use crate::protocols::{ProtocolServer, ServerContext};
-use crate::auth::{AuthService, User};
-use sqlx::PgPool;
-use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio_rustls::{TlsAcceptor, server::TlsStream};
-use tracing::{info, error, debug, warn};
-use uuid::Uuid;
-use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 use base64;
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{server::TlsStream, TlsAcceptor};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 pub struct ImapServer {
     config: ImapConfig,
@@ -32,16 +32,19 @@ impl ProtocolServer for ImapServer {
     async fn start(&self) -> Result<()> {
         let bind_addr = format!("{}:{}", self.config.bind_address, self.config.port);
         let tls_bind_addr = format!("{}:{}", self.config.bind_address, self.config.tls_port);
-        
-        info!("Starting IMAP server on {} (plain) and {} (TLS)", bind_addr, tls_bind_addr);
-        
+
+        info!(
+            "Starting IMAP server on {} (plain) and {} (TLS)",
+            bind_addr, tls_bind_addr
+        );
+
         // Start both plain and TLS listeners
         let plain_listener = TcpListener::bind(&bind_addr).await?;
         let tls_listener = TcpListener::bind(&tls_bind_addr).await?;
-        
+
         let context = Arc::new(self.context.clone());
         let config = Arc::new(self.config.clone());
-        
+
         // Handle plain IMAP connections
         let plain_context = context.clone();
         let plain_config = config.clone();
@@ -62,7 +65,7 @@ impl ProtocolServer for ImapServer {
                 }
             }
         });
-        
+
         // Handle TLS IMAP connections
         let tls_context = context.clone();
         let tls_config = config.clone();
@@ -77,7 +80,9 @@ impl ProtocolServer for ImapServer {
                         tokio::spawn(async move {
                             match tls_acceptor.accept(stream).await {
                                 Ok(tls_stream) => {
-                                    if let Err(e) = handle_imap_tls_connection(tls_stream, ctx, cfg).await {
+                                    if let Err(e) =
+                                        handle_imap_tls_connection(tls_stream, ctx, cfg).await
+                                    {
                                         error!("IMAP TLS connection error: {}", e);
                                     }
                                 }
@@ -89,10 +94,10 @@ impl ProtocolServer for ImapServer {
                 }
             }
         });
-        
+
         Ok(())
     }
-    
+
     async fn stop(&self) -> Result<()> {
         info!("Stopping IMAP server");
         Ok(())
@@ -205,7 +210,10 @@ impl ImapSession {
         }
 
         if parts.len() < 3 {
-            return Ok(format!("{} BAD LOGIN requires username and password\r\n", tag));
+            return Ok(format!(
+                "{} BAD LOGIN requires username and password\r\n",
+                tag
+            ));
         }
 
         let username = parts[1].trim_matches('"');
@@ -233,7 +241,10 @@ impl ImapSession {
             "PLAIN" => {
                 Ok("+ \r\n".to_string()) // Request credentials
             }
-            _ => Ok(format!("{} NO Authentication mechanism not supported\r\n", tag)),
+            _ => Ok(format!(
+                "{} NO Authentication mechanism not supported\r\n",
+                tag
+            )),
         }
     }
 
@@ -248,12 +259,12 @@ impl ImapSession {
         }
 
         let mailbox_name = parts[1].trim_matches('"');
-        
+
         match self.get_mailbox(&user, mailbox_name).await? {
             Some(mailbox) => {
                 // Build sequence number mapping
                 self.build_sequence_map(&mailbox).await?;
-                
+
                 let response = format!(
                     "* {} EXISTS\r\n* {} RECENT\r\n* OK [UNSEEN {}] Message {} is first unseen\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n* OK [PERMANENTFLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\*)] Limited\r\n{} OK [READ-WRITE] SELECT completed\r\n",
                     mailbox.exists,
@@ -264,7 +275,7 @@ impl ImapSession {
                     mailbox.uidnext,
                     tag
                 );
-                
+
                 self.state = ImapState::Selected(user, mailbox);
                 Ok(response)
             }
@@ -284,11 +295,11 @@ impl ImapSession {
         }
 
         let mailbox_name = parts[1].trim_matches('"');
-        
+
         match self.get_mailbox(&user, mailbox_name).await? {
             Some(mailbox) => {
                 self.build_sequence_map(&mailbox).await?;
-                
+
                 let response = format!(
                     "* {} EXISTS\r\n* {} RECENT\r\n* OK [UNSEEN {}] Message {} is first unseen\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n* OK [PERMANENTFLAGS ()] No permanent flags permitted\r\n{} OK [READ-ONLY] EXAMINE completed\r\n",
                     mailbox.exists,
@@ -299,7 +310,7 @@ impl ImapSession {
                     mailbox.uidnext,
                     tag
                 );
-                
+
                 self.state = ImapState::Selected(user, mailbox);
                 Ok(response)
             }
@@ -318,7 +329,7 @@ impl ImapSession {
         }
 
         let mailbox_name = parts[1].trim_matches('"');
-        
+
         // Check if mailbox already exists
         if self.get_mailbox(&user, mailbox_name).await?.is_some() {
             return Ok(format!("{} NO Mailbox already exists\r\n", tag));
@@ -347,7 +358,7 @@ impl ImapSession {
         }
 
         let mailbox_name = parts[1].trim_matches('"');
-        
+
         // Don't allow deleting INBOX
         if mailbox_name.to_uppercase() == "INBOX" {
             return Ok(format!("{} NO Cannot delete INBOX\r\n", tag));
@@ -376,12 +387,15 @@ impl ImapSession {
         };
 
         if parts.len() < 3 {
-            return Ok(format!("{} BAD RENAME requires old and new mailbox names\r\n", tag));
+            return Ok(format!(
+                "{} BAD RENAME requires old and new mailbox names\r\n",
+                tag
+            ));
         }
 
         let old_name = parts[1].trim_matches('"');
         let new_name = parts[2].trim_matches('"');
-        
+
         // Don't allow renaming INBOX
         if old_name.to_uppercase() == "INBOX" {
             return Ok(format!("{} NO Cannot rename INBOX\r\n", tag));
@@ -410,12 +424,15 @@ impl ImapSession {
         };
 
         if parts.len() < 3 {
-            return Ok(format!("{} BAD LIST requires reference and mailbox pattern\r\n", tag));
+            return Ok(format!(
+                "{} BAD LIST requires reference and mailbox pattern\r\n",
+                tag
+            ));
         }
 
         let _reference = parts[1].trim_matches('"');
         let pattern = parts[2].trim_matches('"');
-        
+
         let mailboxes = if pattern == "*" || pattern == "%" {
             // List all mailboxes
             sqlx::query!(
@@ -456,11 +473,14 @@ impl ImapSession {
         };
 
         if parts.len() < 3 {
-            return Ok(format!("{} BAD STATUS requires mailbox name and status items\r\n", tag));
+            return Ok(format!(
+                "{} BAD STATUS requires mailbox name and status items\r\n",
+                tag
+            ));
         }
 
         let mailbox_name = parts[1].trim_matches('"');
-        
+
         match self.get_mailbox(&user, mailbox_name).await? {
             Some(mailbox) => {
                 let response = format!(
@@ -519,14 +539,19 @@ impl ImapSession {
         let mut response = String::new();
         for msg in deleted_messages {
             // Find sequence number for this UID
-            if let Some(seq) = self.sequence_map.iter().find(|(_, &uid)| uid == msg.uid).map(|(&seq, _)| seq) {
+            if let Some(seq) = self
+                .sequence_map
+                .iter()
+                .find(|(_, &uid)| uid == msg.uid)
+                .map(|(&seq, _)| seq)
+            {
                 response.push_str(&format!("* {} EXPUNGE\r\n", seq));
             }
         }
 
         // Rebuild sequence map
         self.build_sequence_map(&mailbox).await?;
-        
+
         response.push_str(&format!("{} OK EXPUNGE completed\r\n", tag));
         Ok(response)
     }
@@ -565,7 +590,10 @@ impl ImapSession {
         };
 
         if parts.len() < 3 {
-            return Ok(format!("{} BAD FETCH requires sequence set and message data item names\r\n", tag));
+            return Ok(format!(
+                "{} BAD FETCH requires sequence set and message data item names\r\n",
+                tag
+            ));
         }
 
         let sequence_set = parts[1];
@@ -573,7 +601,7 @@ impl ImapSession {
 
         // Parse sequence set (simplified - just handle single numbers and ranges)
         let sequences = self.parse_sequence_set(sequence_set);
-        
+
         let mut response = String::new();
         for seq in sequences {
             if let Some(&uid) = self.sequence_map.get(&seq) {
@@ -582,7 +610,7 @@ impl ImapSession {
                 }
             }
         }
-        
+
         response.push_str(&format!("{} OK FETCH completed\r\n", tag));
         Ok(response)
     }
@@ -594,7 +622,10 @@ impl ImapSession {
         };
 
         if parts.len() < 4 {
-            return Ok(format!("{} BAD STORE requires sequence set, message data item name, and value\r\n", tag));
+            return Ok(format!(
+                "{} BAD STORE requires sequence set, message data item name, and value\r\n",
+                tag
+            ));
         }
 
         let sequence_set = parts[1];
@@ -603,7 +634,7 @@ impl ImapSession {
 
         // Parse sequence set
         let sequences = self.parse_sequence_set(sequence_set);
-        
+
         let mut response = String::new();
         for seq in sequences {
             if let Some(&uid) = self.sequence_map.get(&seq) {
@@ -614,7 +645,7 @@ impl ImapSession {
                         .split_whitespace()
                         .map(|s| s.to_string())
                         .collect();
-                    
+
                     sqlx::query!(
                         "UPDATE messages SET flags = $1 WHERE mailbox_id = $2 AND uid = $3",
                         &flag_list,
@@ -623,12 +654,12 @@ impl ImapSession {
                     )
                     .execute(&self.db_pool)
                     .await?;
-                    
+
                     response.push_str(&format!("* {} FETCH (FLAGS ({}))\r\n", seq, flags));
                 }
             }
         }
-        
+
         response.push_str(&format!("{} OK STORE completed\r\n", tag));
         Ok(response)
     }
@@ -677,7 +708,10 @@ impl ImapSession {
 
     async fn handle_logout(&mut self, tag: &str) -> Result<String> {
         self.state = ImapState::Logout;
-        Ok(format!("* BYE IMAP4rev1 Server logging out\r\n{} OK LOGOUT completed\r\n", tag))
+        Ok(format!(
+            "* BYE IMAP4rev1 Server logging out\r\n{} OK LOGOUT completed\r\n",
+            tag
+        ))
     }
 
     // Helper methods
@@ -733,7 +767,7 @@ impl ImapSession {
 
     async fn build_sequence_map(&mut self, mailbox: &Mailbox) -> Result<()> {
         self.sequence_map.clear();
-        
+
         let messages = sqlx::query!(
             "SELECT uid FROM messages WHERE mailbox_id = $1 ORDER BY uid",
             mailbox.id
@@ -761,7 +795,9 @@ impl ImapSession {
 
         if let Some(row) = row {
             // Find sequence number for this UID
-            let sequence = self.sequence_map.iter()
+            let sequence = self
+                .sequence_map
+                .iter()
                 .find(|(_, &u)| u == uid)
                 .map(|(&seq, _)| seq)
                 .unwrap_or(0);
@@ -788,13 +824,15 @@ impl ImapSession {
 
     fn parse_sequence_set(&self, sequence_set: &str) -> Vec<i32> {
         let mut sequences = Vec::new();
-        
+
         for part in sequence_set.split(',') {
             if part.contains(':') {
                 // Range
                 let range_parts: Vec<&str> = part.split(':').collect();
                 if range_parts.len() == 2 {
-                    if let (Ok(start), Ok(end)) = (range_parts[0].parse::<i32>(), range_parts[1].parse::<i32>()) {
+                    if let (Ok(start), Ok(end)) =
+                        (range_parts[0].parse::<i32>(), range_parts[1].parse::<i32>())
+                    {
                         for seq in start..=end {
                             sequences.push(seq);
                         }
@@ -807,38 +845,48 @@ impl ImapSession {
                 }
             }
         }
-        
+
         sequences
     }
 
-    fn format_fetch_response(&self, sequence: i32, message: &ImapMessage, data_items: &str) -> String {
+    fn format_fetch_response(
+        &self,
+        sequence: i32,
+        message: &ImapMessage,
+        data_items: &str,
+    ) -> String {
         let mut response = format!("* {} FETCH (", sequence);
         let mut items = Vec::new();
 
         if data_items.to_uppercase().contains("UID") {
             items.push(format!("UID {}", message.uid));
         }
-        
+
         if data_items.to_uppercase().contains("FLAGS") {
             let flags_str = message.flags.join(" ");
             items.push(format!("FLAGS ({})", flags_str));
         }
-        
+
         if data_items.to_uppercase().contains("INTERNALDATE") {
-            items.push(format!("INTERNALDATE \"{}\"", message.internal_date.format("%d-%b-%Y %H:%M:%S %z")));
+            items.push(format!(
+                "INTERNALDATE \"{}\"",
+                message.internal_date.format("%d-%b-%Y %H:%M:%S %z")
+            ));
         }
-        
+
         if data_items.to_uppercase().contains("RFC822.SIZE") {
             items.push(format!("RFC822.SIZE {}", message.size_bytes));
         }
-        
+
         if data_items.to_uppercase().contains("ENVELOPE") {
             let subject = message.subject.as_deref().unwrap_or("NIL");
             let sender = message.sender.as_deref().unwrap_or("NIL");
             items.push(format!("ENVELOPE (NIL \"{}\" ((\"{}\" NIL \"user\" \"domain.com\")) NIL NIL NIL NIL NIL NIL NIL)", subject, sender));
         }
-        
-        if data_items.to_uppercase().contains("BODY") && !data_items.to_uppercase().contains("BODY.PEEK") {
+
+        if data_items.to_uppercase().contains("BODY")
+            && !data_items.to_uppercase().contains("BODY.PEEK")
+        {
             // Mark as seen when fetching body
             items.push("BODY (\"text\" \"plain\" NIL NIL NIL \"7bit\" {} NIL)".to_string());
         }
@@ -857,11 +905,13 @@ async fn handle_imap_connection(
 ) -> Result<()> {
     let mut reader = BufReader::new(&stream);
     let mut writer = BufWriter::new(&stream);
-    
+
     let mut session = ImapSession::new(context.db_pool.clone(), config.clone());
 
     // Send greeting
-    writer.write_all(b"* OK IMAP4rev1 Service Ready\r\n").await?;
+    writer
+        .write_all(b"* OK IMAP4rev1 Service Ready\r\n")
+        .await?;
     writer.flush().await?;
 
     let mut line = String::new();
@@ -879,7 +929,9 @@ async fn handle_imap_connection(
                 // Parse tag and command
                 let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
                 if parts.len() < 2 {
-                    writer.write_all(b"* BAD Invalid command format\r\n").await?;
+                    writer
+                        .write_all(b"* BAD Invalid command format\r\n")
+                        .await?;
                     writer.flush().await?;
                     continue;
                 }
@@ -913,11 +965,13 @@ async fn handle_imap_tls_connection(
 ) -> Result<()> {
     let mut reader = BufReader::new(&stream);
     let mut writer = BufWriter::new(&stream);
-    
+
     let mut session = ImapSession::new(context.db_pool.clone(), config.clone());
 
     // Send greeting
-    writer.write_all(b"* OK IMAP4rev1 Service Ready (TLS)\r\n").await?;
+    writer
+        .write_all(b"* OK IMAP4rev1 Service Ready (TLS)\r\n")
+        .await?;
     writer.flush().await?;
 
     let mut line = String::new();
@@ -935,7 +989,9 @@ async fn handle_imap_tls_connection(
                 // Parse tag and command
                 let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
                 if parts.len() < 2 {
-                    writer.write_all(b"* BAD Invalid command format\r\n").await?;
+                    writer
+                        .write_all(b"* BAD Invalid command format\r\n")
+                        .await?;
                     writer.flush().await?;
                     continue;
                 }

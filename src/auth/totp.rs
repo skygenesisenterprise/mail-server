@@ -19,7 +19,7 @@ pub fn verify_code(secret: &str, code: &str) -> bool {
     };
 
     let time_step = get_current_time_step();
-    
+
     // Check current time step and adjacent ones (to account for clock drift)
     for offset in -1..=1 {
         if let Ok(expected_code) = generate_totp_code(&secret_bytes, time_step + offset) {
@@ -28,23 +28,24 @@ pub fn verify_code(secret: &str, code: &str) -> bool {
             }
         }
     }
-    
+
     false
 }
 
 pub fn generate_totp_code(secret: &[u8], time_step: u64) -> Result<String> {
-    let mut mac = HmacSha1::new_from_slice(secret)
-        .map_err(|_| crate::error::MailServerError::Authentication("Invalid TOTP secret".to_string()))?;
-    
+    let mut mac = HmacSha1::new_from_slice(secret).map_err(|_| {
+        crate::error::MailServerError::Authentication("Invalid TOTP secret".to_string())
+    })?;
+
     mac.update(&time_step.to_be_bytes());
     let result = mac.finalize().into_bytes();
-    
+
     let offset = (result[19] & 0xf) as usize;
     let code = ((result[offset] & 0x7f) as u32) << 24
         | ((result[offset + 1] & 0xff) as u32) << 16
         | ((result[offset + 2] & 0xff) as u32) << 8
         | (result[offset + 3] & 0xff) as u32;
-    
+
     Ok(format!("{:06}", code % 1_000_000))
 }
 
@@ -64,7 +65,7 @@ pub fn generate_qr_code_url(secret: &str, account_name: &str, issuer: &str) -> S
         secret,
         urlencoding::encode(issuer)
     );
-    
+
     format!(
         "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={}",
         urlencoding::encode(&totp_url)
@@ -78,8 +79,9 @@ mod tests {
     #[test]
     fn test_totp_generation() {
         let secret = "JBSWY3DPEHPK3PXP";
-        let secret_bytes = base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret).unwrap();
-        
+        let secret_bytes =
+            base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret).unwrap();
+
         // Test with known time step
         let code = generate_totp_code(&secret_bytes, 1).unwrap();
         assert_eq!(code.len(), 6);

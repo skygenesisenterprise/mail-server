@@ -1,17 +1,17 @@
+use crate::auth::{AuthService, User};
 use crate::config::SmtpConfig;
 use crate::error::{MailServerError, Result};
 use crate::protocols::{ProtocolServer, ServerContext};
-use crate::auth::{AuthService, User};
-use sqlx::PgPool;
-use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio_rustls::{TlsAcceptor, server::TlsStream};
-use tracing::{info, error, debug, warn};
-use mail_parser::Message;
-use uuid::Uuid;
-use std::collections::HashMap;
 use chrono::Utc;
+use mail_parser::Message;
+use sqlx::PgPool;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{server::TlsStream, TlsAcceptor};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 pub struct SmtpServer {
     config: SmtpConfig,
@@ -32,16 +32,19 @@ impl ProtocolServer for SmtpServer {
     async fn start(&self) -> Result<()> {
         let bind_addr = format!("{}:{}", self.config.bind_address, self.config.port);
         let tls_bind_addr = format!("{}:{}", self.config.bind_address, self.config.tls_port);
-        
-        info!("Starting SMTP server on {} (plain) and {} (TLS)", bind_addr, tls_bind_addr);
-        
+
+        info!(
+            "Starting SMTP server on {} (plain) and {} (TLS)",
+            bind_addr, tls_bind_addr
+        );
+
         // Start both plain and TLS listeners
         let plain_listener = TcpListener::bind(&bind_addr).await?;
         let tls_listener = TcpListener::bind(&tls_bind_addr).await?;
-        
+
         let context = Arc::new(self.context.clone());
         let config = Arc::new(self.config.clone());
-        
+
         // Handle plain SMTP connections
         let plain_context = context.clone();
         let plain_config = config.clone();
@@ -62,7 +65,7 @@ impl ProtocolServer for SmtpServer {
                 }
             }
         });
-        
+
         // Handle TLS SMTP connections
         let tls_context = context.clone();
         let tls_config = config.clone();
@@ -77,7 +80,9 @@ impl ProtocolServer for SmtpServer {
                         tokio::spawn(async move {
                             match tls_acceptor.accept(stream).await {
                                 Ok(tls_stream) => {
-                                    if let Err(e) = handle_smtp_tls_connection(tls_stream, ctx, cfg).await {
+                                    if let Err(e) =
+                                        handle_smtp_tls_connection(tls_stream, ctx, cfg).await
+                                    {
                                         error!("SMTP TLS connection error: {}", e);
                                     }
                                 }
@@ -89,10 +94,10 @@ impl ProtocolServer for SmtpServer {
                 }
             }
         });
-        
+
         Ok(())
     }
-    
+
     async fn stop(&self) -> Result<()> {
         info!("Stopping SMTP server");
         Ok(())
@@ -157,7 +162,7 @@ impl SmtpSession {
         }
 
         self.state = SmtpState::Greeted;
-        
+
         if parts[0] == "EHLO" {
             Ok(format!(
                 "250-{} Hello {}\r\n250-AUTH PLAIN LOGIN\r\n250-STARTTLS\r\n250 SIZE {}\r\n",
@@ -223,7 +228,7 @@ impl SmtpSession {
         }
 
         let from_addr = parts[1][5..].trim_matches(['<', '>', ' ']);
-        
+
         // Validate sender address format
         if !is_valid_email(from_addr) {
             return Ok("553 Invalid sender address\r\n".to_string());
@@ -250,7 +255,7 @@ impl SmtpSession {
         }
 
         let to_addr = parts[1][3..].trim_matches(['<', '>', ' ']);
-        
+
         // Validate recipient address format
         if !is_valid_email(to_addr) {
             return Ok("553 Invalid recipient address\r\n".to_string());
@@ -300,7 +305,10 @@ impl SmtpSession {
 
         // Store message for each recipient
         for recipient in &recipients {
-            if let Err(e) = self.store_message_for_recipient(&message, &from_addr, recipient, message_data).await {
+            if let Err(e) = self
+                .store_message_for_recipient(&message, &from_addr, recipient, message_data)
+                .await
+            {
                 error!("Failed to store message for {}: {}", recipient, e);
                 return Ok("451 Temporary failure in message storage\r\n".to_string());
             }
@@ -398,7 +406,7 @@ async fn handle_smtp_connection(
 ) -> Result<()> {
     let mut reader = BufReader::new(&stream);
     let mut writer = BufWriter::new(&stream);
-    
+
     let mut session = SmtpSession::new(
         "mail.example.com".to_string(), // This should come from config
         context.db_pool.clone(),
@@ -406,7 +414,9 @@ async fn handle_smtp_connection(
     );
 
     // Send greeting
-    writer.write_all(b"220 mail.example.com ESMTP Rust Mail Server\r\n").await?;
+    writer
+        .write_all(b"220 mail.example.com ESMTP Rust Mail Server\r\n")
+        .await?;
     writer.flush().await?;
 
     let mut line = String::new();
@@ -463,7 +473,7 @@ async fn handle_smtp_tls_connection(
 ) -> Result<()> {
     let mut reader = BufReader::new(&stream);
     let mut writer = BufWriter::new(&stream);
-    
+
     let mut session = SmtpSession::new(
         "mail.example.com".to_string(), // This should come from config
         context.db_pool.clone(),
@@ -471,7 +481,9 @@ async fn handle_smtp_tls_connection(
     );
 
     // Send greeting
-    writer.write_all(b"220 mail.example.com ESMTP Rust Mail Server (TLS)\r\n").await?;
+    writer
+        .write_all(b"220 mail.example.com ESMTP Rust Mail Server (TLS)\r\n")
+        .await?;
     writer.flush().await?;
 
     let mut line = String::new();

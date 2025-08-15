@@ -10,10 +10,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    api::AppState,
-    auth::Claims,
-    error::MailServerError,
-    storage::email_parser::EmailParser,
+    api::AppState, auth::Claims, error::MailServerError, storage::email_parser::EmailParser,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,7 +82,7 @@ pub async fn send_message(
 
     // Create message ID
     let message_id = Uuid::new_v4();
-    
+
     // Get user's email address
     let user_row = sqlx::query("SELECT email FROM users WHERE id = $1")
         .bind(claims.user_id)
@@ -97,7 +94,7 @@ pub async fn send_message(
                 Json(json!({"error": "Failed to get user information"})),
             )
         })?;
-    
+
     let from_address: String = user_row.get("email");
 
     // Store message in database
@@ -433,7 +430,7 @@ pub async fn search_messages(
         WHERE m.user_id = 
         "#,
     );
-    
+
     query_builder.push_bind(claims.user_id);
 
     // Add search filters
@@ -469,7 +466,8 @@ pub async fn search_messages(
         if has_attachments {
             query_builder.push(" AND EXISTS(SELECT 1 FROM attachments WHERE message_id = m.id)");
         } else {
-            query_builder.push(" AND NOT EXISTS(SELECT 1 FROM attachments WHERE message_id = m.id)");
+            query_builder
+                .push(" AND NOT EXISTS(SELECT 1 FROM attachments WHERE message_id = m.id)");
         }
     }
 

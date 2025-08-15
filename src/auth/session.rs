@@ -1,5 +1,5 @@
 use crate::error::Result;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -24,10 +24,15 @@ impl SessionManager {
         Self { db_pool }
     }
 
-    pub async fn create_session(&self, user_id: Uuid, ip_address: Option<String>, user_agent: Option<String>) -> Result<Session> {
+    pub async fn create_session(
+        &self,
+        user_id: Uuid,
+        ip_address: Option<String>,
+        user_agent: Option<String>,
+    ) -> Result<Session> {
         let token = self.generate_session_token();
         let expires_at = Utc::now() + Duration::hours(24); // 24 hour sessions
-        
+
         let session_id = sqlx::query_scalar!(
             "INSERT INTO sessions (user_id, token, expires_at, ip_address, user_agent) 
              VALUES ($1, $2, $3, $4, $5) RETURNING id",
@@ -88,34 +93,25 @@ impl SessionManager {
     }
 
     pub async fn invalidate_session(&self, token: &str) -> Result<()> {
-        sqlx::query!(
-            "DELETE FROM sessions WHERE token = $1",
-            token
-        )
-        .execute(&self.db_pool)
-        .await?;
+        sqlx::query!("DELETE FROM sessions WHERE token = $1", token)
+            .execute(&self.db_pool)
+            .await?;
 
         Ok(())
     }
 
     pub async fn invalidate_user_sessions(&self, user_id: Uuid) -> Result<()> {
-        sqlx::query!(
-            "DELETE FROM sessions WHERE user_id = $1",
-            user_id
-        )
-        .execute(&self.db_pool)
-        .await?;
+        sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user_id)
+            .execute(&self.db_pool)
+            .await?;
 
         Ok(())
     }
 
     pub async fn cleanup_expired_sessions(&self) -> Result<()> {
-        sqlx::query!(
-            "DELETE FROM sessions WHERE expires_at < $1",
-            Utc::now()
-        )
-        .execute(&self.db_pool)
-        .await?;
+        sqlx::query!("DELETE FROM sessions WHERE expires_at < $1", Utc::now())
+            .execute(&self.db_pool)
+            .await?;
 
         Ok(())
     }
@@ -144,16 +140,19 @@ impl SessionManager {
         .fetch_all(&self.db_pool)
         .await?;
 
-        let sessions = rows.into_iter().map(|row| Session {
-            id: row.id,
-            user_id: row.user_id,
-            token: row.token,
-            expires_at: row.expires_at,
-            created_at: row.created_at,
-            last_activity: row.last_activity,
-            ip_address: row.ip_address,
-            user_agent: row.user_agent,
-        }).collect();
+        let sessions = rows
+            .into_iter()
+            .map(|row| Session {
+                id: row.id,
+                user_id: row.user_id,
+                token: row.token,
+                expires_at: row.expires_at,
+                created_at: row.created_at,
+                last_activity: row.last_activity,
+                ip_address: row.ip_address,
+                user_agent: row.user_agent,
+            })
+            .collect();
 
         Ok(sessions)
     }

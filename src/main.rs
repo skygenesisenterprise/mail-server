@@ -1,19 +1,21 @@
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod config;
-mod error;
-mod auth;
-mod storage;
-mod protocols;
-mod domain;
-mod tls;
 mod api;
+mod auth;
+mod config;
+mod domain;
+mod error;
+mod protocols;
+mod storage;
+mod storage;
+mod tls;
 
-use config::Config;
-use protocols::{smtp::SmtpServer, imap::ImapServer, pop3::Pop3Server};
 use api::ApiServer;
+use config::Config;
+use protocols::{imap::ImapServer, pop3::Pop3Server, smtp::SmtpServer};
+use storage::Database;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,13 +34,17 @@ async fn main() -> Result<()> {
     let config = Config::load().await?;
     info!("Configuration loaded successfully");
 
-    // Initialize database connection pool
-    let db_pool = storage::init_database(&config.database).await?;
+    let database = Database::new(&config.database.url).await?;
     info!("Database connection established");
+
+    let db_pool = database.pool().clone();
 
     // Run database migrations
     storage::run_migrations(&db_pool).await?;
     info!("Database migrations completed");
+
+    database.health_check().await?;
+    info!("Database health check passed");
 
     // Initialize TLS configuration
     let tls_config = tls::load_tls_config(&config.tls).await?;
@@ -51,7 +57,7 @@ async fn main() -> Result<()> {
     let api_server = ApiServer::new(config.api.clone(), db_pool.clone(), tls_config.clone());
 
     info!("Starting protocol servers and HTTP API...");
-    
+
     tokio::try_join!(
         smtp_server.start(),
         imap_server.start(),

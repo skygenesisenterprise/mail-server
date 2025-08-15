@@ -1,12 +1,12 @@
 use crate::config::PowerDnsConfig;
 use crate::error::{MailServerError, Result};
+use chrono::{DateTime, Duration, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 use std::collections::HashMap;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Domain {
@@ -130,21 +130,22 @@ impl DomainManager {
             http_client: Client::new(),
         }
     }
-    
+
     pub async fn create_domain(&self, domain_name: &str, mail_server_ip: &str) -> Result<Uuid> {
         // Validate domain name
         self.validate_domain_name(domain_name)?;
-        
+
         // Check if domain already exists
         if self.get_domain_by_name(domain_name).await?.is_some() {
-            return Err(MailServerError::Domain(
-                format!("Domain {} already exists", domain_name)
-            ));
+            return Err(MailServerError::Domain(format!(
+                "Domain {} already exists",
+                domain_name
+            )));
         }
 
         // Generate verification token
         let verification_token = self.generate_verification_token();
-        
+
         // Create domain in database first
         let domain_id = sqlx::query_scalar!(
             "INSERT INTO domains (name, status, verification_token) VALUES ($1, $2, $3) RETURNING id",
@@ -159,7 +160,8 @@ impl DomainManager {
         match self.create_powerdns_zone(domain_name, mail_server_ip).await {
             Ok(_) => {
                 // Create default DNS records
-                self.create_default_dns_records(domain_id, domain_name, mail_server_ip).await?;
+                self.create_default_dns_records(domain_id, domain_name, mail_server_ip)
+                    .await?;
                 info!("Successfully created domain: {}", domain_name);
             }
             Err(e) => {
@@ -173,9 +175,11 @@ impl DomainManager {
 
         Ok(domain_id)
     }
-    
+
     pub async fn verify_domain(&self, domain_id: Uuid) -> Result<bool> {
-        let domain = self.get_domain_by_id(domain_id).await?
+        let domain = self
+            .get_domain_by_id(domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         if domain.status != DomainStatus::Pending {
@@ -183,10 +187,15 @@ impl DomainManager {
         }
 
         // Check for verification TXT record
-        let verification_record = format!("mailserver-verify={}", 
-            domain.verification_token.as_deref().unwrap_or(""));
-        
-        if self.check_txt_record(&domain.name, &verification_record).await? {
+        let verification_record = format!(
+            "mailserver-verify={}",
+            domain.verification_token.as_deref().unwrap_or("")
+        );
+
+        if self
+            .check_txt_record(&domain.name, &verification_record)
+            .await?
+        {
             // Mark domain as verified
             sqlx::query!(
                 "UPDATE domains SET status = $1, verified_at = $2 WHERE id = $3",
@@ -205,23 +214,29 @@ impl DomainManager {
     }
 
     pub async fn activate_domain(&self, domain_id: Uuid) -> Result<()> {
-        let domain = self.get_domain_by_id(domain_id).await?
+        let domain = self
+            .get_domain_by_id(domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         if domain.status != DomainStatus::Verified {
             return Err(MailServerError::Domain(
-                "Domain must be verified before activation".to_string()
+                "Domain must be verified before activation".to_string(),
             ));
         }
 
         // Perform health checks
         let health_results = self.perform_domain_health_checks(domain_id).await?;
-        let critical_issues = health_results.iter()
+        let critical_issues = health_results
+            .iter()
             .filter(|check| matches!(check.status, HealthStatus::Critical))
             .count();
 
         if critical_issues > 0 {
-            warn!("Domain {} has {} critical health issues", domain.name, critical_issues);
+            warn!(
+                "Domain {} has {} critical health issues",
+                domain.name, critical_issues
+            );
         }
 
         // Activate domain
@@ -237,8 +252,18 @@ impl DomainManager {
         Ok(())
     }
 
-    pub async fn create_dns_record(&self, domain_id: Uuid, name: &str, record_type: DnsRecordType, content: &str, ttl: u32, priority: Option<u16>) -> Result<Uuid> {
-        let domain = self.get_domain_by_id(domain_id).await?
+    pub async fn create_dns_record(
+        &self,
+        domain_id: Uuid,
+        name: &str,
+        record_type: DnsRecordType,
+        content: &str,
+        ttl: u32,
+        priority: Option<u16>,
+    ) -> Result<Uuid> {
+        let domain = self
+            .get_domain_by_id(domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         // Validate record content based on type
@@ -259,17 +284,34 @@ impl DomainManager {
         .await?;
 
         // Create record in PowerDNS
-        self.create_powerdns_record(&domain.name, name, &record_type, content, ttl, priority).await?;
+        self.create_powerdns_record(&domain.name, name, &record_type, content, ttl, priority)
+            .await?;
 
-        info!("Created DNS record: {} {} {} for domain {}", name, format!("{:?}", record_type), content, domain.name);
+        info!(
+            "Created DNS record: {} {} {} for domain {}",
+            name,
+            format!("{:?}", record_type),
+            content,
+            domain.name
+        );
         Ok(record_id)
     }
 
-    pub async fn update_dns_record(&self, record_id: Uuid, content: &str, ttl: u32, priority: Option<u16>) -> Result<()> {
-        let record = self.get_dns_record_by_id(record_id).await?
+    pub async fn update_dns_record(
+        &self,
+        record_id: Uuid,
+        content: &str,
+        ttl: u32,
+        priority: Option<u16>,
+    ) -> Result<()> {
+        let record = self
+            .get_dns_record_by_id(record_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("DNS record not found".to_string()))?;
 
-        let domain = self.get_domain_by_id(record.domain_id).await?
+        let domain = self
+            .get_domain_by_id(record.domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         // Validate new content
@@ -288,46 +330,83 @@ impl DomainManager {
         .await?;
 
         // Update record in PowerDNS
-        self.update_powerdns_record(&domain.name, &record.name, &record.record_type, content, ttl, priority).await?;
+        self.update_powerdns_record(
+            &domain.name,
+            &record.name,
+            &record.record_type,
+            content,
+            ttl,
+            priority,
+        )
+        .await?;
 
-        info!("Updated DNS record: {} for domain {}", record.name, domain.name);
+        info!(
+            "Updated DNS record: {} for domain {}",
+            record.name, domain.name
+        );
         Ok(())
     }
 
     pub async fn delete_dns_record(&self, record_id: Uuid) -> Result<()> {
-        let record = self.get_dns_record_by_id(record_id).await?
+        let record = self
+            .get_dns_record_by_id(record_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("DNS record not found".to_string()))?;
 
-        let domain = self.get_domain_by_id(record.domain_id).await?
+        let domain = self
+            .get_domain_by_id(record.domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         // Delete from PowerDNS first
-        self.delete_powerdns_record(&domain.name, &record.name, &record.record_type).await?;
+        self.delete_powerdns_record(&domain.name, &record.name, &record.record_type)
+            .await?;
 
         // Delete from database
         sqlx::query!("DELETE FROM dns_records WHERE id = $1", record_id)
             .execute(&self.db_pool)
             .await?;
 
-        info!("Deleted DNS record: {} for domain {}", record.name, domain.name);
+        info!(
+            "Deleted DNS record: {} for domain {}",
+            record.name, domain.name
+        );
         Ok(())
     }
 
     pub async fn setup_email_security(&self, domain_id: Uuid, mail_server_ip: &str) -> Result<()> {
-        let domain = self.get_domain_by_id(domain_id).await?
+        let domain = self
+            .get_domain_by_id(domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         // Create SPF record
         let spf_content = format!("v=spf1 ip4:{} ~all", mail_server_ip);
-        self.create_dns_record(domain_id, &domain.name, DnsRecordType::TXT, &spf_content, 3600, None).await?;
+        self.create_dns_record(
+            domain_id,
+            &domain.name,
+            DnsRecordType::TXT,
+            &spf_content,
+            3600,
+            None,
+        )
+        .await?;
 
         // Create DMARC record
         let dmarc_content = "v=DMARC1; p=quarantine; rua=mailto:dmarc@".to_owned() + &domain.name;
-        self.create_dns_record(domain_id, &format!("_dmarc.{}", domain.name), DnsRecordType::TXT, &dmarc_content, 3600, None).await?;
+        self.create_dns_record(
+            domain_id,
+            &format!("_dmarc.{}", domain.name),
+            DnsRecordType::TXT,
+            &dmarc_content,
+            3600,
+            None,
+        )
+        .await?;
 
         // Generate DKIM key pair and create DKIM record
         let (dkim_private_key, dkim_public_key) = self.generate_dkim_keys()?;
-        
+
         // Store DKIM private key securely (in production, use a secure key store)
         sqlx::query!(
             "UPDATE domains SET dkim_private_key = $1 WHERE id = $2",
@@ -339,14 +418,27 @@ impl DomainManager {
 
         // Create DKIM DNS record
         let dkim_content = format!("v=DKIM1; k=rsa; p={}", dkim_public_key);
-        self.create_dns_record(domain_id, &format!("default._domainkey.{}", domain.name), DnsRecordType::TXT, &dkim_content, 3600, None).await?;
+        self.create_dns_record(
+            domain_id,
+            &format!("default._domainkey.{}", domain.name),
+            DnsRecordType::TXT,
+            &dkim_content,
+            3600,
+            None,
+        )
+        .await?;
 
         info!("Email security records created for domain: {}", domain.name);
         Ok(())
     }
 
-    pub async fn perform_domain_health_checks(&self, domain_id: Uuid) -> Result<Vec<DomainHealthCheck>> {
-        let domain = self.get_domain_by_id(domain_id).await?
+    pub async fn perform_domain_health_checks(
+        &self,
+        domain_id: Uuid,
+    ) -> Result<Vec<DomainHealthCheck>> {
+        let domain = self
+            .get_domain_by_id(domain_id)
+            .await?
             .ok_or_else(|| MailServerError::NotFound("Domain not found".to_string()))?;
 
         let mut health_checks = Vec::new();
@@ -391,7 +483,7 @@ impl DomainManager {
         )
         .fetch_optional(&self.db_pool)
         .await?;
-        
+
         if let Some(row) = row {
             Ok(Some(Domain {
                 id: row.id,
@@ -427,7 +519,7 @@ impl DomainManager {
         )
         .fetch_optional(&self.db_pool)
         .await?;
-        
+
         if let Some(row) = row {
             Ok(Some(Domain {
                 id: row.id,
@@ -543,45 +635,73 @@ impl DomainManager {
 
     fn validate_domain_name(&self, domain: &str) -> Result<()> {
         if domain.is_empty() || domain.len() > 253 {
-            return Err(MailServerError::InvalidInput("Invalid domain name length".to_string()));
+            return Err(MailServerError::InvalidInput(
+                "Invalid domain name length".to_string(),
+            ));
         }
 
         // Basic domain validation
-        if !domain.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') {
-            return Err(MailServerError::InvalidInput("Invalid characters in domain name".to_string()));
+        if !domain
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+        {
+            return Err(MailServerError::InvalidInput(
+                "Invalid characters in domain name".to_string(),
+            ));
         }
 
-        if domain.starts_with('.') || domain.ends_with('.') || domain.starts_with('-') || domain.ends_with('-') {
-            return Err(MailServerError::InvalidInput("Invalid domain name format".to_string()));
+        if domain.starts_with('.')
+            || domain.ends_with('.')
+            || domain.starts_with('-')
+            || domain.ends_with('-')
+        {
+            return Err(MailServerError::InvalidInput(
+                "Invalid domain name format".to_string(),
+            ));
         }
 
         Ok(())
     }
 
-    fn validate_dns_record_content(&self, record_type: &DnsRecordType, content: &str) -> Result<()> {
+    fn validate_dns_record_content(
+        &self,
+        record_type: &DnsRecordType,
+        content: &str,
+    ) -> Result<()> {
         match record_type {
             DnsRecordType::A => {
                 // Validate IPv4 address
                 if content.parse::<std::net::Ipv4Addr>().is_err() {
-                    return Err(MailServerError::InvalidInput("Invalid IPv4 address".to_string()));
+                    return Err(MailServerError::InvalidInput(
+                        "Invalid IPv4 address".to_string(),
+                    ));
                 }
             }
             DnsRecordType::AAAA => {
                 // Validate IPv6 address
                 if content.parse::<std::net::Ipv6Addr>().is_err() {
-                    return Err(MailServerError::InvalidInput("Invalid IPv6 address".to_string()));
+                    return Err(MailServerError::InvalidInput(
+                        "Invalid IPv6 address".to_string(),
+                    ));
                 }
             }
             DnsRecordType::MX => {
                 // MX record should have priority and hostname
                 if !content.contains(' ') {
-                    return Err(MailServerError::InvalidInput("MX record must include priority".to_string()));
+                    return Err(MailServerError::InvalidInput(
+                        "MX record must include priority".to_string(),
+                    ));
                 }
             }
-            DnsRecordType::TXT | DnsRecordType::SPF | DnsRecordType::DKIM | DnsRecordType::DMARC => {
+            DnsRecordType::TXT
+            | DnsRecordType::SPF
+            | DnsRecordType::DKIM
+            | DnsRecordType::DMARC => {
                 // Text records - basic length validation
                 if content.len() > 255 {
-                    return Err(MailServerError::InvalidInput("Text record too long".to_string()));
+                    return Err(MailServerError::InvalidInput(
+                        "Text record too long".to_string(),
+                    ));
                 }
             }
             _ => {} // Other record types - basic validation could be added
@@ -614,42 +734,85 @@ impl DomainManager {
             ],
             rrsets: None,
         };
-        
-        let url = format!("{}/api/v1/servers/localhost/zones", self.powerdns_config.api_url);
-        
-        let response = self.http_client
+
+        let url = format!(
+            "{}/api/v1/servers/localhost/zones",
+            self.powerdns_config.api_url
+        );
+
+        let response = self
+            .http_client
             .post(&url)
             .header("X-API-Key", &self.powerdns_config.api_key)
             .json(&zone)
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(MailServerError::Domain(
-                format!("Failed to create PowerDNS zone: {} - {}", response.status(), error_text)
-            ));
+            return Err(MailServerError::Domain(format!(
+                "Failed to create PowerDNS zone: {} - {}",
+                response.status(),
+                error_text
+            )));
         }
-        
+
         Ok(())
     }
 
-    async fn create_default_dns_records(&self, domain_id: Uuid, domain_name: &str, mail_server_ip: &str) -> Result<()> {
+    async fn create_default_dns_records(
+        &self,
+        domain_id: Uuid,
+        domain_name: &str,
+        mail_server_ip: &str,
+    ) -> Result<()> {
         // Create A record for domain
-        self.create_dns_record(domain_id, domain_name, DnsRecordType::A, mail_server_ip, 3600, None).await?;
-        
+        self.create_dns_record(
+            domain_id,
+            domain_name,
+            DnsRecordType::A,
+            mail_server_ip,
+            3600,
+            None,
+        )
+        .await?;
+
         // Create MX record
         let mx_content = format!("10 mail.{}", domain_name);
-        self.create_dns_record(domain_id, domain_name, DnsRecordType::MX, &mx_content, 3600, Some(10)).await?;
-        
+        self.create_dns_record(
+            domain_id,
+            domain_name,
+            DnsRecordType::MX,
+            &mx_content,
+            3600,
+            Some(10),
+        )
+        .await?;
+
         // Create A record for mail subdomain
         let mail_subdomain = format!("mail.{}", domain_name);
-        self.create_dns_record(domain_id, &mail_subdomain, DnsRecordType::A, mail_server_ip, 3600, None).await?;
-        
+        self.create_dns_record(
+            domain_id,
+            &mail_subdomain,
+            DnsRecordType::A,
+            mail_server_ip,
+            3600,
+            None,
+        )
+        .await?;
+
         Ok(())
     }
 
-    async fn create_powerdns_record(&self, domain_name: &str, name: &str, record_type: &DnsRecordType, content: &str, ttl: u32, _priority: Option<u16>) -> Result<()> {
+    async fn create_powerdns_record(
+        &self,
+        domain_name: &str,
+        name: &str,
+        record_type: &DnsRecordType,
+        content: &str,
+        ttl: u32,
+        _priority: Option<u16>,
+    ) -> Result<()> {
         let rrset = PowerDnsRRSet {
             name: name.to_string(),
             record_type: format!("{:?}", record_type),
@@ -659,14 +822,14 @@ impl DomainManager {
             }],
             ttl: Some(ttl),
         };
-        
+
         let url = format!(
             "{}/api/v1/servers/localhost/zones/{}/rrsets",
-            self.powerdns_config.api_url,
-            domain_name
+            self.powerdns_config.api_url, domain_name
         );
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .patch(&url)
             .header("X-API-Key", &self.powerdns_config.api_key)
             .json(&serde_json::json!({
@@ -674,37 +837,53 @@ impl DomainManager {
             }))
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(MailServerError::Domain(
-                format!("Failed to create PowerDNS record: {} - {}", response.status(), error_text)
-            ));
+            return Err(MailServerError::Domain(format!(
+                "Failed to create PowerDNS record: {} - {}",
+                response.status(),
+                error_text
+            )));
         }
-        
+
         Ok(())
     }
 
-    async fn update_powerdns_record(&self, domain_name: &str, name: &str, record_type: &DnsRecordType, content: &str, ttl: u32, _priority: Option<u16>) -> Result<()> {
+    async fn update_powerdns_record(
+        &self,
+        domain_name: &str,
+        name: &str,
+        record_type: &DnsRecordType,
+        content: &str,
+        ttl: u32,
+        _priority: Option<u16>,
+    ) -> Result<()> {
         // PowerDNS updates are done by replacing the entire RRSet
-        self.create_powerdns_record(domain_name, name, record_type, content, ttl, _priority).await
+        self.create_powerdns_record(domain_name, name, record_type, content, ttl, _priority)
+            .await
     }
 
-    async fn delete_powerdns_record(&self, domain_name: &str, name: &str, record_type: &DnsRecordType) -> Result<()> {
+    async fn delete_powerdns_record(
+        &self,
+        domain_name: &str,
+        name: &str,
+        record_type: &DnsRecordType,
+    ) -> Result<()> {
         let rrset = PowerDnsRRSet {
             name: name.to_string(),
             record_type: format!("{:?}", record_type),
             records: vec![], // Empty records array deletes the RRSet
             ttl: None,
         };
-        
+
         let url = format!(
             "{}/api/v1/servers/localhost/zones/{}/rrsets",
-            self.powerdns_config.api_url,
-            domain_name
+            self.powerdns_config.api_url, domain_name
         );
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .patch(&url)
             .header("X-API-Key", &self.powerdns_config.api_key)
             .json(&serde_json::json!({
@@ -712,25 +891,30 @@ impl DomainManager {
             }))
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(MailServerError::Domain(
-                format!("Failed to delete PowerDNS record: {} - {}", response.status(), error_text)
-            ));
+            return Err(MailServerError::Domain(format!(
+                "Failed to delete PowerDNS record: {} - {}",
+                response.status(),
+                error_text
+            )));
         }
-        
+
         Ok(())
     }
 
     async fn check_txt_record(&self, domain: &str, expected_content: &str) -> Result<bool> {
         // In a real implementation, this would use a DNS resolver
         // For now, we'll simulate the check
-        debug!("Checking TXT record for domain: {} with content: {}", domain, expected_content);
-        
+        debug!(
+            "Checking TXT record for domain: {} with content: {}",
+            domain, expected_content
+        );
+
         // Simulate DNS lookup delay
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // In production, implement actual DNS TXT record lookup
         Ok(true) // Placeholder - always return true for demo
     }
@@ -739,8 +923,9 @@ impl DomainManager {
         // In a real implementation, this would generate actual RSA key pairs
         // For now, return placeholder keys
         let private_key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...placeholder...\n-----END RSA PRIVATE KEY-----".to_string();
-        let public_key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...placeholder...".to_string();
-        
+        let public_key =
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...placeholder...".to_string();
+
         Ok((private_key, public_key))
     }
 
@@ -860,7 +1045,7 @@ mod tests {
                 api_url: "http://localhost:8081".to_string(),
                 api_key: "test".to_string(),
                 default_ttl: 3600,
-            }
+            },
         );
 
         assert!(manager.validate_domain_name("example.com").is_ok());
@@ -879,12 +1064,20 @@ mod tests {
                 api_url: "http://localhost:8081".to_string(),
                 api_key: "test".to_string(),
                 default_ttl: 3600,
-            }
+            },
         );
 
-        assert!(manager.validate_dns_record_content(&DnsRecordType::A, "192.168.1.1").is_ok());
-        assert!(manager.validate_dns_record_content(&DnsRecordType::A, "invalid-ip").is_err());
-        assert!(manager.validate_dns_record_content(&DnsRecordType::AAAA, "2001:db8::1").is_ok());
-        assert!(manager.validate_dns_record_content(&DnsRecordType::AAAA, "invalid-ipv6").is_err());
+        assert!(manager
+            .validate_dns_record_content(&DnsRecordType::A, "192.168.1.1")
+            .is_ok());
+        assert!(manager
+            .validate_dns_record_content(&DnsRecordType::A, "invalid-ip")
+            .is_err());
+        assert!(manager
+            .validate_dns_record_content(&DnsRecordType::AAAA, "2001:db8::1")
+            .is_ok());
+        assert!(manager
+            .validate_dns_record_content(&DnsRecordType::AAAA, "invalid-ipv6")
+            .is_err());
     }
 }

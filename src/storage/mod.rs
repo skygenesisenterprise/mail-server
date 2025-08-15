@@ -1,36 +1,37 @@
 pub mod database;
+pub mod email_parser;
 pub mod mailbox;
 
 use crate::config::DatabaseConfig;
 use crate::error::Result;
-use sqlx::{PgPool, postgres::PgPoolOptions, Row};
-use std::time::Duration;
-use tracing::{info, warn, error};
-use serde::{Serialize, Deserialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use flate2::Compression;
 use flate2::write::GzEncoder;
+use flate2::Compression;
+use serde::{Deserialize, Serialize};
+use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::io::Write;
+use std::time::Duration;
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
-pub use mailbox::{Mailbox, MailboxStats, MailboxInfo, MailboxManager};
+pub use mailbox::{Mailbox, MailboxInfo, MailboxManager, MailboxStats};
 
 pub async fn init_database(config: &DatabaseConfig) -> Result<PgPool> {
     info!("Initializing database connection pool");
-    
+
     let pool = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .min_connections(config.min_connections)
         .acquire_timeout(Duration::from_secs(config.connection_timeout))
         .connect(&config.url)
         .await?;
-    
+
     Ok(pool)
 }
 
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
     info!("Running database migrations");
-    
+
     // Create tables if they don't exist
     sqlx::query(
         r#"
@@ -323,7 +324,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
-    
+
     info!("Database migrations completed successfully");
     Ok(())
 }
@@ -390,13 +391,17 @@ impl StorageManager {
             archive_enabled: true,
         }
     }
-    
-    pub async fn store_message(&self, message: &MessageStorage, raw_content: &[u8]) -> Result<Uuid> {
+
+    pub async fn store_message(
+        &self,
+        message: &MessageStorage,
+        raw_content: &[u8],
+    ) -> Result<Uuid> {
         let mut tx = self.pool.begin().await?;
-        
+
         // Calculate content hash for deduplication
         let content_hash = sha256::digest(raw_content);
-        
+
         // Check for duplicates if deduplication is enabled
         if self.deduplication_enabled {
             if let Some(existing_id) = self.check_duplicate(&content_hash).await? {
@@ -407,20 +412,25 @@ impl StorageManager {
                 .bind(&content_hash)
                 .execute(&mut *tx)
                 .await?;
-                
+
                 tx.commit().await?;
                 return Ok(existing_id);
             }
         }
-        
+
         // Compress message if enabled and size is above threshold
-        let (raw_message, compressed_message, compressed_size) = if self.compression_enabled && raw_content.len() > 1024 {
-            let compressed = self.compress_content(raw_content)?;
-            (None, Some(compressed.clone()), Some(compressed.len() as i32))
-        } else {
-            (Some(raw_content.to_vec()), None, None)
-        };
-        
+        let (raw_message, compressed_message, compressed_size) =
+            if self.compression_enabled && raw_content.len() > 1024 {
+                let compressed = self.compress_content(raw_content)?;
+                (
+                    None,
+                    Some(compressed.clone()),
+                    Some(compressed.len() as i32),
+                )
+            } else {
+                (Some(raw_content.to_vec()), None, None)
+            };
+
         // Insert message
         let message_id = sqlx::query_scalar::<_, Uuid>(
             r#"
@@ -456,7 +466,7 @@ impl StorageManager {
         .bind(message.internal_date)
         .fetch_one(&mut *tx)
         .await?;
-        
+
         // Record for deduplication
         if self.deduplication_enabled {
             sqlx::query(
@@ -467,16 +477,22 @@ impl StorageManager {
             .execute(&mut *tx)
             .await?;
         }
-        
+
         tx.commit().await?;
-        
+
         // Update storage usage asynchronously
         self.update_storage_usage(message.mailbox_id).await?;
-        
+
         Ok(message_id)
     }
-    
-    pub async fn search_messages(&self, mailbox_id: Uuid, query: &str, limit: i32, offset: i32) -> Result<Vec<MessageStorage>> {
+
+    pub async fn search_messages(
+        &self,
+        mailbox_id: Uuid,
+        query: &str,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<MessageStorage>> {
         let messages = sqlx::query_as::<_, MessageStorage>(
             r#"
             SELECT id, mailbox_id, uid, message_id, thread_id, subject, sender, recipients,
@@ -494,10 +510,10 @@ impl StorageManager {
         .bind(offset)
         .fetch_all(&self.pool)
         .await?;
-        
+
         Ok(messages)
     }
-    
+
     pub async fn get_storage_quota(&self, user_id: Uuid) -> Result<StorageQuota> {
         let quota = sqlx::query_as::<_, StorageQuota>(
             r#"
@@ -514,49 +530,49 @@ impl StorageManager {
         .bind(user_id)
         .fetch_one(&self.pool)
         .await?;
-        
+
         Ok(quota)
     }
-    
+
     pub async fn archive_old_messages(&self, days_old: i32) -> Result<i32> {
         if !self.archive_enabled {
             return Ok(0);
         }
-        
+
         let archived_count = sqlx::query_scalar::<_, i64>(
             r#"
             UPDATE messages SET archived_at = NOW()
             WHERE archived_at IS NULL 
             AND internal_date < NOW() - INTERVAL '%d days'
             AND NOT ('\\Important' = ANY(flags))
-            "#
+            "#,
         )
         .bind(days_old)
         .fetch_one(&self.pool)
         .await?;
-        
+
         info!("Archived {} old messages", archived_count);
         Ok(archived_count as i32)
     }
-    
+
     pub async fn compress_old_messages(&self, days_old: i32) -> Result<i32> {
         if !self.compression_enabled {
             return Ok(0);
         }
-        
+
         let messages = sqlx::query!(
             "SELECT id, raw_message FROM messages WHERE compressed_message IS NULL AND internal_date < NOW() - INTERVAL '%d days'",
             days_old
         )
         .fetch_all(&self.pool)
         .await?;
-        
+
         let mut compressed_count = 0;
-        
+
         for message in messages {
             if let Some(raw_content) = message.raw_message {
                 let compressed = self.compress_content(&raw_content)?;
-                
+
                 sqlx::query(
                     "UPDATE messages SET compressed_message = $1, compressed_size_bytes = $2, raw_message = NULL WHERE id = $3"
                 )
@@ -565,54 +581,52 @@ impl StorageManager {
                 .bind(message.id)
                 .execute(&self.pool)
                 .await?;
-                
+
                 compressed_count += 1;
             }
         }
-        
+
         info!("Compressed {} old messages", compressed_count);
         Ok(compressed_count)
     }
-    
+
     async fn check_duplicate(&self, content_hash: &str) -> Result<Option<Uuid>> {
         let result = sqlx::query_scalar::<_, Option<Uuid>>(
-            "SELECT first_message_id FROM message_deduplication WHERE content_hash = $1"
+            "SELECT first_message_id FROM message_deduplication WHERE content_hash = $1",
         )
         .bind(content_hash)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(result.flatten())
     }
-    
+
     async fn update_storage_usage(&self, mailbox_id: Uuid) -> Result<()> {
         // Get user_id from mailbox
-        let user_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT user_id FROM mailboxes WHERE id = $1"
-        )
-        .bind(mailbox_id)
-        .fetch_one(&self.pool)
-        .await?;
-        
+        let user_id = sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM mailboxes WHERE id = $1")
+            .bind(mailbox_id)
+            .fetch_one(&self.pool)
+            .await?;
+
         // Call the stored procedure to calculate usage
         sqlx::query("SELECT calculate_storage_usage($1)")
             .bind(user_id)
             .execute(&self.pool)
             .await?;
-        
+
         Ok(())
     }
-    
+
     fn compress_content(&self, content: &[u8]) -> Result<Vec<u8>> {
-        use flate2::Compression;
         use flate2::write::GzEncoder;
+        use flate2::Compression;
         use std::io::Write;
-        
+
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(content)?;
         Ok(encoder.finish()?)
     }
-    
+
     pub async fn create_backup(&self, backup_type: &str) -> Result<Uuid> {
         let backup_id = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO backup_jobs (job_type, status, started_at) VALUES ($1, 'running', NOW()) RETURNING id"
@@ -620,10 +634,10 @@ impl StorageManager {
         .bind(backup_type)
         .fetch_one(&self.pool)
         .await?;
-        
+
         // Backup logic would go here - this is a placeholder
         info!("Starting {} backup with ID: {}", backup_type, backup_id);
-        
+
         Ok(backup_id)
     }
 }
