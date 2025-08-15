@@ -6,7 +6,7 @@ The Rust Mail Server uses TOML format for configuration. The main configuration 
 
 ### Server Configuration
 
-\`\`\`toml
+```toml
 [server]
 bind_address = "0.0.0.0"        # IP address to bind to
 smtp_port = 25                  # SMTP port (standard)
@@ -17,43 +17,43 @@ imap_tls_port = 993             # IMAP over TLS port
 pop3_tls_port = 995             # POP3 over TLS port
 max_connections = 1000          # Maximum concurrent connections
 connection_timeout = 300        # Connection timeout in seconds
-\`\`\`
+```
 
 ### Database Configuration
 
-\`\`\`toml
+```toml
 [database]
 url = "postgresql://user:password@localhost/mailserver"
 max_connections = 10            # Connection pool size
 connection_timeout = 30         # Connection timeout in seconds
 idle_timeout = 600             # Idle connection timeout
-\`\`\`
+```
 
 ### TLS/SSL Configuration
 
-\`\`\`toml
+```toml
 [tls]
 cert_path = "/path/to/certificate.pem"
 key_path = "/path/to/private-key.pem"
 ca_path = "/path/to/ca-bundle.pem"     # Optional CA bundle
 protocols = ["TLSv1.2", "TLSv1.3"]    # Supported TLS versions
 ciphers = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
-\`\`\`
+```
 
 ### Logging Configuration
 
-\`\`\`toml
+```toml
 [logging]
 level = "info"                  # Log level: trace, debug, info, warn, error
 file = "/var/log/rust-mail-server/server.log"
 max_size = "100MB"             # Maximum log file size
 max_files = 10                 # Number of log files to keep
 format = "json"                # Log format: json, text
-\`\`\`
+```
 
 ### Authentication Configuration
 
-\`\`\`toml
+```toml
 [auth]
 password_min_length = 8         # Minimum password length
 password_require_uppercase = true
@@ -64,11 +64,11 @@ max_login_attempts = 5          # Maximum failed login attempts
 lockout_duration = 300          # Account lockout duration in seconds
 session_timeout = 3600          # Session timeout in seconds
 totp_enabled = true            # Enable two-factor authentication
-\`\`\`
+```
 
 ### Security Configuration
 
-\`\`\`toml
+```toml
 [security]
 rate_limit_enabled = true       # Enable rate limiting
 rate_limit_requests = 100       # Requests per window
@@ -78,22 +78,22 @@ ip_blacklist = []              # Blacklisted IP addresses
 fail2ban_enabled = true        # Enable automatic IP blocking
 fail2ban_threshold = 10        # Failed attempts before blocking
 fail2ban_duration = 3600       # Block duration in seconds
-\`\`\`
+```
 
 ### PowerDNS Integration
 
-\`\`\`toml
+```toml
 [powerdns]
 api_url = "http://localhost:8081"
 api_key = "your-api-key"
 default_ttl = 3600             # Default TTL for DNS records
 auto_create_records = true     # Automatically create DNS records
 verify_domains = true          # Verify domain ownership
-\`\`\`
+```
 
 ### Storage Configuration
 
-\`\`\`toml
+```toml
 [storage]
 compression_enabled = true      # Enable message compression
 compression_algorithm = "gzip"  # Compression algorithm: gzip, lz4, zstd
@@ -101,11 +101,11 @@ deduplication_enabled = true   # Enable message deduplication
 max_message_size = "25MB"      # Maximum message size
 attachment_storage = "database" # Attachment storage: database, filesystem, s3
 attachment_path = "/var/lib/rust-mail-server/attachments"
-\`\`\`
+```
 
 ### SMTP Configuration
 
-\`\`\`toml
+```toml
 [smtp]
 hostname = "mail.example.com"   # Server hostname
 max_message_size = "25MB"       # Maximum message size
@@ -113,33 +113,33 @@ max_recipients = 100           # Maximum recipients per message
 require_auth = true            # Require authentication for sending
 allow_relay = false            # Allow mail relay
 relay_domains = []             # Domains allowed for relay
-\`\`\`
+```
 
 ### IMAP Configuration
 
-\`\`\`toml
+```toml
 [imap]
 max_connections_per_user = 10   # Maximum IMAP connections per user
 idle_timeout = 1800            # IDLE command timeout
 search_timeout = 30            # SEARCH command timeout
 fetch_timeout = 60             # FETCH command timeout
 enable_extensions = ["IDLE", "SORT", "THREAD", "QUOTA"]
-\`\`\`
+```
 
 ### POP3 Configuration
 
-\`\`\`toml
+```toml
 [pop3]
 max_connections_per_user = 5    # Maximum POP3 connections per user
 session_timeout = 600          # Session timeout in seconds
 delete_on_retrieve = false     # Delete messages after retrieval
-\`\`\`
+```
 
 ## Environment Variables
 
 You can override configuration values using environment variables:
 
-\`\`\`bash
+```bash
 # Database URL
 export RUST_MAIL_SERVER_DATABASE_URL="postgresql://user:pass@host/db"
 
@@ -153,7 +153,7 @@ export RUST_MAIL_SERVER_POWERDNS_API_KEY="secret-key"
 
 # Logging level
 export RUST_MAIL_SERVER_LOGGING_LEVEL="debug"
-\`\`\`
+```
 
 ## Configuration Validation
 
@@ -168,7 +168,7 @@ The server validates the configuration on startup. Common validation errors:
 
 ### Development Configuration
 
-\`\`\`toml
+```toml
 [server]
 bind_address = "127.0.0.1"
 smtp_port = 2525
@@ -188,11 +188,11 @@ lockout_duration = 60
 
 [security]
 rate_limit_enabled = false
-\`\`\`
+```
 
 ### Production Configuration
 
-\`\`\`toml
+```toml
 [server]
 bind_address = "0.0.0.0"
 max_connections = 5000
@@ -218,7 +218,7 @@ rate_limit_enabled = true
 rate_limit_requests = 50
 rate_limit_window = 60
 fail2ban_enabled = true
-\`\`\`
+```
 
 ## Configuration Management
 
@@ -226,25 +226,26 @@ fail2ban_enabled = true
 
 The server supports configuration reloading without restart:
 
-\`\`\`bash
+```bash
 # Send SIGHUP to reload configuration
 sudo systemctl reload rust-mail-server
 
 # Or use the admin command
 sudo -u mailserver /opt/rust-mail-server/rust-mail-server config reload
-\`\`\`
+```
 
 ### Configuration Backup
 
 Always backup your configuration before making changes:
 
-\`\`\`bash
+```bash
 sudo cp /etc/rust-mail-server/config.toml /etc/rust-mail-server/config.toml.backup
-\`\`\`
+```
 
 ### Configuration Testing
 
 Test configuration changes before applying:
 
-\`\`\`bash
+```bash
 sudo -u mailserver /opt/rust-mail-server/rust-mail-server config validate --config /etc/rust-mail-server/config.toml
+```

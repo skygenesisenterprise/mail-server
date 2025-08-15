@@ -21,29 +21,29 @@ Before installation, ensure you have:
 
 The easiest way to install the mail server is using the provided installation script:
 
-\`\`\`bash
+```bash
 # Download and run the installation script
 curl -sSL https://raw.githubusercontent.com/your-repo/rust-mail-server/main/install.sh | sudo bash
-\`\`\`
+```
 
 Or clone the repository and run locally:
 
-\`\`\`bash
+```bash
 git clone https://github.com/your-repo/rust-mail-server.git
 cd rust-mail-server
 sudo chmod +x install.sh
 sudo ./install.sh
-\`\`\`
+```
 
 ## Manual Installation
 
 ### Step 1: Install Dependencies
 
 #### Ubuntu/Debian
-\`\`\`bash
+```bash
 sudo apt update
 sudo apt install -y curl build-essential pkg-config libssl-dev postgresql postgresql-contrib nginx certbot python3-certbot-nginx
-\`\`\`
+```
 
 #### CentOS/RHEL
 \`\`\`bash
@@ -51,28 +51,28 @@ sudo yum update -y
 sudo yum groupinstall -y "Development Tools"
 sudo yum install -y curl openssl-devel postgresql-server postgresql-contrib nginx certbot python3-certbot-nginx
 sudo postgresql-setup initdb
-\`\`\`
+```
 
 ### Step 2: Install Rust
-\`\`\`bash
+```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
-\`\`\`
+```
 
 ### Step 3: Create System User
-\`\`\`bash
+```bash
 sudo useradd --system --home-dir /var/lib/rust-mail-server --shell /bin/false mailserver
-\`\`\`
+```
 
 ### Step 4: Create Directories
-\`\`\`bash
+```bash
 sudo mkdir -p /opt/rust-mail-server /etc/rust-mail-server /var/log/rust-mail-server /var/lib/rust-mail-server
 sudo chown mailserver:mailserver /var/log/rust-mail-server /var/lib/rust-mail-server
 sudo chmod 750 /var/log/rust-mail-server /var/lib/rust-mail-server
-\`\`\`
+```
 
 ### Step 5: Build and Install
-\`\`\`bash
+```bash
 # Clone the repository
 git clone https://github.com/your-repo/rust-mail-server.git
 cd rust-mail-server
@@ -84,10 +84,10 @@ cargo build --release
 sudo cp target/release/rust-mail-server /opt/rust-mail-server/
 sudo chown root:root /opt/rust-mail-server/rust-mail-server
 sudo chmod 755 /opt/rust-mail-server/rust-mail-server
-\`\`\`
+```
 
 ### Step 6: Configure Database
-\`\`\`bash
+```bash
 # Start PostgreSQL
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
@@ -99,10 +99,10 @@ CREATE USER mailserver WITH ENCRYPTED PASSWORD 'your-secure-password';
 GRANT ALL PRIVILEGES ON DATABASE mailserver TO mailserver;
 \q
 EOF
-\`\`\`
+```
 
 ### Step 7: Create Configuration
-\`\`\`bash
+```bash
 sudo tee /etc/rust-mail-server/config.toml << EOF
 [server]
 bind_address = "0.0.0.0"
@@ -132,10 +132,10 @@ EOF
 
 sudo chown root:mailserver /etc/rust-mail-server/config.toml
 sudo chmod 640 /etc/rust-mail-server/config.toml
-\`\`\`
+```
 
 ### Step 8: Create Systemd Service
-\`\`\`bash
+```bash
 sudo tee /etc/systemd/system/rust-mail-server.service << EOF
 [Unit]
 Description=Rust Mail Server
@@ -167,10 +167,10 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable rust-mail-server
-\`\`\`
+```
 
 ### Step 9: Configure Firewall
-\`\`\`bash
+```bash
 # UFW (Ubuntu/Debian)
 sudo ufw allow 25/tcp   # SMTP
 sudo ufw allow 143/tcp  # IMAP
@@ -191,29 +191,29 @@ sudo firewall-cmd --permanent --add-port=995/tcp
 sudo firewall-cmd --permanent --add-port=80/tcp
 sudo firewall-cmd --permanent --add-port=443/tcp
 sudo firewall-cmd --reload
-\`\`\`
+```
 
 ### Step 10: Run Database Migrations
-\`\`\`bash
+```bash
 sudo -u mailserver /opt/rust-mail-server/rust-mail-server migrate --config /etc/rust-mail-server/config.toml
-\`\`\`
+```
 
 ### Step 11: Obtain SSL Certificates
-\`\`\`bash
+```bash
 # Replace mail.yourdomain.com with your actual domain
 sudo certbot certonly --nginx -d mail.yourdomain.com
-\`\`\`
+```
 
 ### Step 12: Start Services
-\`\`\`bash
+```bash
 sudo systemctl start rust-mail-server
 sudo systemctl start nginx
-\`\`\`
+```
 
 ## Post-Installation
 
 ### Verify Installation
-\`\`\`bash
+```bash
 # Check service status
 sudo systemctl status rust-mail-server
 
@@ -225,13 +225,13 @@ telnet localhost 25
 
 # Test IMAP connection
 telnet localhost 143
-\`\`\`
+```
 
 ### Create First User
-\`\`\`bash
+```bash
 # Use the admin CLI (if implemented) or direct database insertion
 sudo -u mailserver /opt/rust-mail-server/rust-mail-server user create --email admin@yourdomain.com --password secure-password
-\`\`\`
+```
 
 ## Troubleshooting
 
